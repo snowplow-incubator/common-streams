@@ -1,0 +1,9 @@
+*.class
+*.log
+
+.bsp/
+target/
+lib/
+
+.vscode/
+.idea/

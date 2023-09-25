@@ -1,0 +1,34 @@
+name: RELEASE
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        module: [ "streams-core", "kinesis", "kafka", "pubsub", "loaders-common"]
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+
+      - name: Deploy ${{ matrix.module }} to Maven Central
+        run: sbt "project ${{ matrix.module }}" ci-release
+        env:
+          PGP_PASSPHRASE: ${{ secrets.SONA_PGP_PASSPHRASE }}
+          PGP_SECRET: ${{ secrets.SONA_PGP_SECRET }}
+          SONATYPE_USERNAME: ${{ secrets.SONA_USER }}
+          SONATYPE_PASSWORD: ${{ secrets.SONA_PASS }}
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+
+      - name: Publish docs
+        run: sbt "project docs" clean makeSite ghpagesPushSite
