@@ -26,7 +26,7 @@ import com.typesafe.sbt.site.SiteScaladocPlugin.autoImport._
 
 // ghpages
 import com.github.sbt.git.SbtGit.git
-import com.github.sbt.sbtghpages.GhpagesPlugin.autoImport.ghpagesNoJekyll
+import com.github.sbt.sbtghpages.GhpagesPlugin.autoImport._
 
 object BuildSettings {
 
@@ -91,7 +91,8 @@ object BuildSettings {
   )
 
   val ghPagesSettings = Seq(
-    git.remoteRepo := "git@github.com:snowplow-incubator/common-streams.git",
+//    git.remoteRepo := "git@github.com:snowplow-incubator/common-streams.git",
+    git.remoteRepo := "https://github.com/snowplow-incubator/common-streams.git",
     ghpagesNoJekyll := true
   )
 }
