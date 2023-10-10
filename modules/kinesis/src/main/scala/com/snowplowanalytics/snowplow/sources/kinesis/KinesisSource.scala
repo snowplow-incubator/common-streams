@@ -136,6 +136,7 @@ object KinesisSource {
         kinesis.readFromKinesisStream(settings)
       }
       .chunks
+      .filter(_.nonEmpty)
       .map { chunk =>
         val ack = chunk.toList
           .groupBy(_.shardId)
@@ -144,7 +145,8 @@ object KinesisSource {
             k -> records.maxBy(_.sequenceNumber).toMetadata[F]
           }
           .toMap
-        LowLevelEvents(chunk.toList.map(_.record.data()), ack)
+        val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).min
+        LowLevelEvents(chunk.toList.map(_.record.data()), ack, Some(earliestTstamp))
       }
   }
 

@@ -21,6 +21,8 @@ import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
 
+import java.time.Instant
+
 import Utils._
 
 class KinesisSourceSpec
@@ -47,8 +49,10 @@ class KinesisSourceSpec
     val testPayload = "test-payload"
 
     for {
-      refProcessed <- Ref[IO].of[List[String]](Nil)
+      refProcessed <- Ref[IO].of[List[ReceivedEvents]](Nil)
+      t1 <- IO.realTimeInstant
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
+      t2 <- IO.realTimeInstant
       processingConfig = new EventProcessingConfig(NoWindowing)
       kinesisConfig    = getKinesisConfig(testStream1Name)
       sourceAndAck     = KinesisSource.build[IO](kinesisConfig).stream(processingConfig, testProcessor(refProcessed))
@@ -56,7 +60,13 @@ class KinesisSourceSpec
       _ <- IO.sleep(2.minutes)
       processed <- refProcessed.get
       _ <- fiber.cancel
-    } yield processed.toSet must beEqualTo(Set(testPayload))
+    } yield List(
+      processed must haveSize(1),
+      processed.head.events must beEqualTo(List(testPayload)),
+      processed.head.tstamp must beSome { tstamp: Instant =>
+        tstamp.toEpochMilli must beBetween(t1.toEpochMilli, t2.toEpochMilli)
+      }
+    ).reduce(_ and _)
   }
 }
 

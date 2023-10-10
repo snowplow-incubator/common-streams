@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.sources.internal
 
 import java.nio.ByteBuffer
+import java.time.Instant
 
 /**
  * The events and checkpointable item emitted by a LowLevelSource
@@ -15,4 +16,8 @@ import java.nio.ByteBuffer
  * This library uses LowLevelEvents internally, but it is never exposed to the high level event
  * processor
  */
-case class LowLevelEvents[C](events: List[ByteBuffer], ack: C)
+case class LowLevelEvents[C](
+  events: List[ByteBuffer],
+  ack: C,
+  earliestSourceTstamp: Option[Instant]
+)
