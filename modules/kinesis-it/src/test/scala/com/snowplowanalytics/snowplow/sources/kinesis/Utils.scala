@@ -19,10 +19,13 @@ import software.amazon.awssdk.services.kinesis.model.{PutRecordRequest, PutRecor
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.time.Instant
 
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 
 object Utils {
+
+  case class ReceivedEvents(events: List[String], tstamp: Option[Instant])
 
   def putDataToKinesis(
     client: KinesisAsyncClient,
@@ -50,10 +53,11 @@ object Utils {
     Some(endpoint)
   )
 
-  def testProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] =
-    _.evalMap { case TokenedEvents(events, token) =>
+  def testProcessor(ref: Ref[IO, List[ReceivedEvents]]): EventProcessor[IO] =
+    _.evalMap { case TokenedEvents(events, token, tstamp) =>
+      val parsed = events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString)
       for {
-        _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
+        _ <- ref.update(_ :+ ReceivedEvents(parsed, tstamp))
       } yield token
     }
 

@@ -106,7 +106,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     def badProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] =
       _.zipWithIndex
-        .evalMap { case (TokenedEvents(events, token), batchId) =>
+        .evalMap { case (TokenedEvents(events, token, _), batchId) =>
           if (batchId >= errorAfterBatch)
             IO.raiseError(new RuntimeException(s"boom! Exceeded $errorAfterBatch batches"))
           else
@@ -236,7 +236,7 @@ object LowLevelSourceSpec {
    *   - Emits the checkpointing tokens immediately
    */
   def testProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] =
-    _.evalMap { case TokenedEvents(events, token) =>
+    _.evalMap { case TokenedEvents(events, token, _) =>
       for {
         _ <- IO.sleep(TimeToProcessBatch)
         _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
@@ -251,7 +251,7 @@ object LowLevelSourceSpec {
    */
   def windowedProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] = { in =>
     Stream.eval(Ref[IO].of[List[Unique.Token]](Nil)).flatMap { checkpoints =>
-      val out = in.evalMap { case TokenedEvents(events, token) =>
+      val out = in.evalMap { case TokenedEvents(events, token, _) =>
         for {
           _ <- IO.sleep(TimeToProcessBatch)
           _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
@@ -282,7 +282,9 @@ object LowLevelSourceSpec {
               .map(eventId => s"rebalance $rebalanceId - batch $batchId - event $eventId")
               .toList
             val asBytes = events.map(_.getBytes(StandardCharsets.UTF_8)).map(ByteBuffer.wrap)
-            Stream.emit(LowLevelEvents(events = asBytes, ack = events)) ++ Stream.sleep[IO](TimeBetweenBatches).drain
+            Stream.emit(LowLevelEvents(events = asBytes, ack = events, earliestSourceTstamp = None)) ++ Stream
+              .sleep[IO](TimeBetweenBatches)
+              .drain
           }
         }
     }

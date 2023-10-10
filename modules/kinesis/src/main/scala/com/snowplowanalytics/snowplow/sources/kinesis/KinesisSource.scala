@@ -142,7 +142,8 @@ object KinesisSource {
           .view
           .mapValues(_.maxBy(_.sequenceNumber).toMetadata[F])
           .toMap
-        LowLevelEvents(chunk.toList.map(_.record.data()), ack)
+        val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).minOption
+        LowLevelEvents(chunk.toList.map(_.record.data()), ack, earliestTstamp)
       }
   }
 

@@ -16,6 +16,7 @@ import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.nio.ByteBuffer
+import java.time.Instant
 
 // kafka
 import fs2.kafka._
@@ -81,7 +82,14 @@ object KafkaSource {
                 _.record.value
               }.toList
               val ack = KafkaCheckpoints(Map(topicPartition.partition -> OffsetAndCommit(last.record.offset, last.offset.commit)))
-              Stream.emit(LowLevelEvents(events, ack))
+              val earliestTstamp = chunk.iterator
+                .flatMap { ccr =>
+                  val ts = ccr.record.timestamp
+                  ts.logAppendTime.orElse(ts.createTime).orElse(ts.unknownTime)
+                }
+                .minOption
+                .map(Instant.ofEpochMilli(_))
+              Stream.emit(LowLevelEvents(events, ack, earliestTstamp))
             case None =>
               Stream.empty
           }

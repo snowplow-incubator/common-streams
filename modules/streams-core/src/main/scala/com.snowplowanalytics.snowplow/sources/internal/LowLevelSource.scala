@@ -88,11 +88,11 @@ private[sources] object LowLevelSource {
    * The token can later be exchanged for the original checkpointable item
    */
   private def tokened[F[_]: Unique: Monad, C](ref: Ref[F, Map[Unique.Token, C]]): Pipe[F, LowLevelEvents[C], TokenedEvents] =
-    _.evalMap { case LowLevelEvents(events, ack) =>
+    _.evalMap { case LowLevelEvents(events, ack, earliestSourceTstamp) =>
       for {
         token <- Unique[F].unique
         _ <- ref.update(_ + (token -> ack))
-      } yield TokenedEvents(events, token)
+      } yield TokenedEvents(events, token, earliestSourceTstamp)
     }
 
   /**
@@ -122,7 +122,7 @@ private[sources] object LowLevelSource {
     control: EagerWindows.Control[F]
   ): Pipe[F, TokenedEvents, Nothing] =
     _.append(Stream.eval(control.waitForPreviousWindow).drain)
-      .evalTap { case TokenedEvents(events, _) =>
+      .evalTap { case TokenedEvents(events, _, _) =>
         Logger[F].debug(s"Batch of ${events.size} events received from the source stream")
       }
       .through(processor)

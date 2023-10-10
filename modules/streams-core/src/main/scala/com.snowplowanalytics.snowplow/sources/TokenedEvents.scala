@@ -10,6 +10,7 @@ package com.snowplowanalytics.snowplow.sources
 import cats.effect.kernel.Unique
 
 import java.nio.ByteBuffer
+import java.time.Instant
 
 /**
  * The events as they are fed into a [[EventProcessor]]
@@ -20,5 +21,12 @@ import java.nio.ByteBuffer
  *   The [[EventProcessor]] must emit this token after it has fully processed the batch of events.
  *   When the [[EventProcessor]] emits the token, it is an instruction to the [[SourceAndAck]] to
  *   ack/checkpoint the events.
+ * @param earliestSourceTstamp
+ *   The timestamp that an event was originally written to the source stream. Used for calculating
+ *   the latency metric.
  */
-case class TokenedEvents(events: List[ByteBuffer], ack: Unique.Token)
+case class TokenedEvents(
+  events: List[ByteBuffer],
+  ack: Unique.Token,
+  earliestSourceTstamp: Option[Instant]
+)

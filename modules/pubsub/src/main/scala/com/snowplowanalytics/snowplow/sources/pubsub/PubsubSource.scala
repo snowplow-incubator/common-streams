@@ -18,6 +18,7 @@ import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.nio.ByteBuffer
+import java.time.Instant
 
 // pubsub
 import com.google.api.core.{ApiFutures, ApiService}
@@ -75,7 +76,11 @@ object PubsubSource {
       }
   }
 
-  private case class SingleMessage[F[_]](message: ByteBuffer, ackReply: AckReplyConsumerWithResponse)
+  private case class SingleMessage[F[_]](
+    message: ByteBuffer,
+    ackReply: AckReplyConsumerWithResponse,
+    tstamp: Instant
+  )
 
   private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[List[AckReplyConsumerWithResponse]]] = {
     val resources = for {
@@ -92,11 +97,12 @@ object PubsubSource {
         .fromQueueUnterminated(queue)
         .chunks
         .map { chunk =>
-          val events = chunk.map(_.message).toList
-          val acks   = chunk.map(_.ackReply).toList
-          LowLevelEvents(events, acks)
+          val events         = chunk.map(_.message).toList
+          val acks           = chunk.map(_.ackReply).toList
+          val earliestTstamp = chunk.map(_.tstamp).iterator.minOption
+          LowLevelEvents(events, acks, earliestTstamp)
         }
-        .evalTap { case LowLevelEvents(events, _) =>
+        .evalTap { case LowLevelEvents(events, _, _) =>
           val numPermits = events.map(e => permitsFor(config, e.limit())).sum
           semaphore.releaseN(numPermits)
         }
@@ -170,7 +176,7 @@ object PubsubSource {
 
     def go(acc: List[AckReplyConsumerWithResponse], queue: QueueSource[F, SingleMessage[F]]): F[List[AckReplyConsumerWithResponse]] =
       queue.tryTake.flatMap {
-        case Some(SingleMessage(_, acker)) =>
+        case Some(SingleMessage(_, acker, _)) =>
           go(acker :: acc, queue)
         case None =>
           Monad[F].pure(acc)
@@ -190,8 +196,9 @@ object PubsubSource {
   ): MessageReceiverWithAckResponse =
     new MessageReceiverWithAckResponse {
       def receiveMessage(message: PubsubMessage, ackReply: AckReplyConsumerWithResponse): Unit = {
+        val tstamp = Instant.ofEpochSecond(message.getPublishTime.getSeconds, message.getPublishTime.getNanos.toLong)
         val put = semaphore.acquireN(permitsFor(config, message.getData.size)) *>
-          queue.offer(SingleMessage(message.getData.asReadOnlyByteBuffer(), ackReply))
+          queue.offer(SingleMessage(message.getData.asReadOnlyByteBuffer(), ackReply, tstamp))
 
         val io = put
           .race(sig.get)
