@@ -154,6 +154,7 @@ object Dependencies {
     schemaDdl,
     badrows,
     circeConfig,
+    circeLiteral % Test,
     fs2,
     igluClient,
     log4cats,

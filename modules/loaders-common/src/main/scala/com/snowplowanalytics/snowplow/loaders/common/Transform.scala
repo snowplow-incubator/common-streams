@@ -24,7 +24,7 @@ import io.circe.Json
 object Transform {
 
   /**
-   * Transform a Snowplow Event to a Spark Row
+   * Transform a Snowplow Event into types compatible with the loader target
    *
    * @param processor
    *   Details about this loader, only used for generating a bad row
@@ -35,8 +35,8 @@ object Transform {
    * @param batchInfo
    *   Pre-calculated Iglu types for a batch of events, used to guide the transformation
    * @return
-   *   A Spark Row if iglu schemas were successfully resolved for this event, and the event's
-   *   entities can be cast to the schema-ddl types. Otherwise a bad row.
+   *   Application-specific types if iglu schemas were successfully resolved for this event, and the
+   *   event's entities can be cast to the schema-ddl types. Otherwise a bad row.
    */
   def transformEvent[A](
     processor: BadRowProcessor,
@@ -53,6 +53,41 @@ object Transform {
         .leftMap { nel =>
           BadRow.LoaderIgluError(processor, BadRowFailure.LoaderIgluErrors(nel), BadPayload.LoaderPayload(event))
         }
+
+  /**
+   * Transform a Snowplow Event into types compatible with the loader target
+   *
+   * Unlike `transformEvent`, this function is not guided by the Iglu Schema. It is appropriate for
+   * destinations with non-strict column types, e.g. Snowflake.
+   *
+   * @param processor
+   *   Details about this loader, only used for generating a bad row
+   * @param caster
+   *   Casts schema + JSON into an application-specific type
+   * @param jsonCaster
+   *   Casts JSON into an application-specific type, without regard for the Iglu schema
+   * @param event
+   *   The Snowplow Event received from the stream
+   * @return
+   *   Application-specific types if the Snowplow atomic fields can be cast to the correct types.
+   *   Otherwise a bad row.
+   */
+  def transformEventUnstructured[A](
+    processor: BadRowProcessor,
+    caster: Caster[A],
+    jsonCaster: Json.Folder[A],
+    event: Event
+  ): Either[BadRow, List[Caster.NamedValue[A]]] =
+    forAtomic(caster, event).toEither
+      .map { atomic =>
+        val entities = event.contexts.toShreddedJson ++ event.derived_contexts.toShreddedJson ++ event.unstruct_event.toShreddedJson.toMap
+        atomic ::: entities.toList.map { case (key, json) =>
+          Caster.NamedValue(key, json.foldWith(jsonCaster))
+        }
+      }
+      .leftMap { nel =>
+        BadRow.LoaderIgluError(processor, BadRowFailure.LoaderIgluErrors(nel), BadPayload.LoaderPayload(event))
+      }
 
   private def failForResolverErrors(
     processor: BadRowProcessor,

@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.loaders
+package com.snowplowanalytics.snowplow.loaders.common
 
 import cats.effect.IO
 import org.specs2.Specification
@@ -14,7 +14,6 @@ import com.snowplowanalytics.iglu.client.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.JavaNetRegistryLookup._
 import com.snowplowanalytics.iglu.schemaddl.parquet.{Field, Type}
 import com.snowplowanalytics.iglu.schemaddl.parquet.Type.Nullability.{Nullable, Required}
-import com.snowplowanalytics.snowplow.loaders.common.{NonAtomicFields, TabledEntity, TypedTabledEntity}
 
 class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
