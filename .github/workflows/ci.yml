@@ -19,6 +19,11 @@ jobs:
         with:
           java-version: 11
 
+      - name: Download test requirements
+        run: |
+          docker pull testcontainers/ryuk:0.5.1
+          docker pull localstack/localstack:2.2.0
+
       - name: Run tests
         run: sbt clean test
 
