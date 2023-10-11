@@ -36,6 +36,7 @@ import software.amazon.kinesis.retrieval.polling.PollingConfig
 // snowplow
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
+import com.snowplowanalytics.snowplow.kinesis._
 
 object KinesisSource {
 
@@ -113,7 +114,7 @@ object KinesisSource {
   private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
     val resources =
       for {
-        region <- Resource.eval(KinesisSourceConfig.getRuntimeRegion)
+        region <- Resource.eval(com.snowplowanalytics.snowplow.kinesis.Util.getRuntimeRegion)
         consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
                               KinesisConsumerSettings(
                                 config.streamName,

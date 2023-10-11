@@ -7,16 +7,11 @@
  */
 package com.snowplowanalytics.snowplow.sources.kinesis
 
-import cats.effect.Sync
-
 import eu.timepit.refined.types.all.PosInt
 
 import io.circe._
 import io.circe.generic.extras.semiauto.deriveConfiguredDecoder
 import io.circe.generic.extras.Configuration
-
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import java.net.URI
 import java.time.Instant
@@ -35,9 +30,6 @@ case class KinesisSourceConfig(
 object KinesisSourceConfig {
 
   private implicit val posIntDecoder: Decoder[PosInt] = Decoder.decodeInt.emap(PosInt.from)
-
-  private[kinesis] def getRuntimeRegion[F[_]: Sync]: F[Region] =
-    Sync[F].blocking((new DefaultAwsRegionProviderChain).getRegion)
 
   sealed trait InitialPosition
 

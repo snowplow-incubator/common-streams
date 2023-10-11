@@ -20,6 +20,7 @@ import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
+import com.snowplowanalytics.snowplow.kinesis._
 
 import java.time.Instant
 
@@ -35,7 +36,7 @@ class KinesisSourceSpec
   /** Resources which are shared across tests */
   override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
     for {
-      region <- Resource.eval(KinesisSourceConfig.getRuntimeRegion[IO])
+      region <- Resource.eval(com.snowplowanalytics.snowplow.kinesis.Util.getRuntimeRegion[IO])
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
