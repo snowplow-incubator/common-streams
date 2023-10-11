@@ -36,6 +36,7 @@ object BuildSettings {
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
     scalacOptions += "-Ywarn-macros:after",
+    Test / fork := true,
     addCompilerPlugin(Dependencies.betterMonadicFor),
     ThisBuild / autoAPIMappings := true,
     ThisBuild / dynverVTagPrefix := false, // Otherwise git tags required to have v-prefix

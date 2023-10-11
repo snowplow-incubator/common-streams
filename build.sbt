@@ -63,11 +63,7 @@ lazy val kinesisIT: Project = project
   .settings(
     publish / skip := true,
     publishLocal / skip := true,
-    /**
-     * AWS_REGION=eu-central-1 is detected by the lib & integration test suite which follows the
-     * same region resolution mechanism as the lib
-     */
-    ThisProject / envVars := Map("AWS_REGION" -> "eu-central-1"),
+    Test / javaOptions ++= Seq("-Daws.region=eu-central-1", "-Daws.accessKeyId=test", "-Daws.secretAccessKey=test"),
     libraryDependencies ++= Dependencies.kinesisItDependencies
   )
 
