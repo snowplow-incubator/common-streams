@@ -130,7 +130,7 @@ private[sources] object LowLevelSource {
       .evalTap(_ => control.waitForPreviousWindow)
       .prefetch // This prefetch means we can ack messages concurrently with processing the next batch
       .evalMap { chunk =>
-        chunk.iterator.toSeq
+        chunk
           .traverse { token =>
             ref
               .modify { map =>
@@ -142,7 +142,7 @@ private[sources] object LowLevelSource {
               }
           }
           .flatMap { cs =>
-            checkpointer.ack(checkpointer.combineAll(cs))
+            checkpointer.ack(checkpointer.combineAll(cs.toIterable))
           }
       }
       .drain

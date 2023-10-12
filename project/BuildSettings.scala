@@ -30,9 +30,13 @@ import com.github.sbt.sbtghpages.GhpagesPlugin.autoImport.ghpagesNoJekyll
 
 object BuildSettings {
 
+  lazy val scala212 = "2.12.18"
+  lazy val scala213 = "2.13.12"
+
   lazy val buildSettings = Seq(
     organization := "com.snowplowanalytics",
-    scalaVersion := "2.13.12",
+    scalaVersion := scala213,
+    crossScalaVersions := List(scala212, scala213),
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
     scalacOptions += "-Ywarn-macros:after",
