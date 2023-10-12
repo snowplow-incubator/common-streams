@@ -139,8 +139,10 @@ object KinesisSource {
       .map { chunk =>
         val ack = chunk.toList
           .groupBy(_.shardId)
-          .view
-          .mapValues(_.maxBy(_.sequenceNumber).toMetadata[F])
+          .iterator
+          .map { case (k, records) =>
+            k -> records.maxBy(_.sequenceNumber).toMetadata[F]
+          }
           .toMap
         LowLevelEvents(chunk.toList.map(_.record.data()), ack)
       }

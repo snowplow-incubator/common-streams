@@ -107,7 +107,7 @@ object Metrics {
             }
           }
         }
-        .recoverWith { t =>
+        .handleErrorWith { t =>
           Logger[F].warn(t)("Caught exception sending statsd metrics")
         }
   }

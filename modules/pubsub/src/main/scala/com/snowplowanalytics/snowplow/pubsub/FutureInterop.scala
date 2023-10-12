@@ -17,8 +17,8 @@ object FutureInterop {
     Async[F]
       .async[A] { cb =>
         val cancel = Async[F].delay {
-          fut.cancel(false): Unit
-        }
+          fut.cancel(false)
+        }.void
         Async[F].delay {
           addCallback(fut, cb)
           Some(cancel)
