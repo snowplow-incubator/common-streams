@@ -22,12 +22,15 @@ object Dependencies {
     val circeExtra       = "0.14.3"
     val circeConfig      = "0.10.0"
     val betterMonadicFor = "0.3.1"
+    val collectionCompat = "2.11.0"
+    val refined          = "0.11.0"
 
     // Streams
     val fs2Kafka      = "3.0.1"
     val pubsub        = "1.123.17"
-    val fs2AwsKinesis = "6.0.3"
+    val fs2AwsKinesis = "4.1.0"
     val awsSdk2       = "2.20.135"
+    val kinesisClient = "2.5.2"
 
     // java
     val slf4j    = "2.0.9"
@@ -50,18 +53,20 @@ object Dependencies {
     val localstack       = "1.19.0"
   }
 
-  val catsEffectKernel  = "org.typelevel"    %% "cats-effect-kernel"   % V.catsEffect
-  val cats              = "org.typelevel"    %% "cats-core"            % V.cats
-  val fs2               = "co.fs2"           %% "fs2-core"             % V.fs2
-  val log4cats          = "org.typelevel"    %% "log4cats-slf4j"       % V.log4cats
-  val catsRetry         = "com.github.cb372" %% "cats-retry"           % V.catsRetry
-  val blazeClient       = "org.http4s"       %% "http4s-blaze-client"  % V.http4s
-  val decline           = "com.monovore"     %% "decline-effect"       % V.decline
-  val circeConfig       = "io.circe"         %% "circe-config"         % V.circeConfig
-  val circeGeneric      = "io.circe"         %% "circe-generic"        % V.circe
-  val circeGenericExtra = "io.circe"         %% "circe-generic-extras" % V.circeExtra
-  val circeLiteral      = "io.circe"         %% "circe-literal"        % V.circe
-  val betterMonadicFor  = "com.olegpy"       %% "better-monadic-for"   % V.betterMonadicFor
+  val catsEffectKernel  = "org.typelevel"          %% "cats-effect-kernel"      % V.catsEffect
+  val cats              = "org.typelevel"          %% "cats-core"               % V.cats
+  val fs2               = "co.fs2"                 %% "fs2-core"                % V.fs2
+  val log4cats          = "org.typelevel"          %% "log4cats-slf4j"          % V.log4cats
+  val catsRetry         = "com.github.cb372"       %% "cats-retry"              % V.catsRetry
+  val blazeClient       = "org.http4s"             %% "http4s-blaze-client"     % V.http4s
+  val decline           = "com.monovore"           %% "decline-effect"          % V.decline
+  val circeConfig       = "io.circe"               %% "circe-config"            % V.circeConfig
+  val circeGeneric      = "io.circe"               %% "circe-generic"           % V.circe
+  val circeGenericExtra = "io.circe"               %% "circe-generic-extras"    % V.circeExtra
+  val circeLiteral      = "io.circe"               %% "circe-literal"           % V.circe
+  val betterMonadicFor  = "com.olegpy"             %% "better-monadic-for"      % V.betterMonadicFor
+  val collectionCompat  = "org.scala-lang.modules" %% "scala-collection-compat" % V.collectionCompat
+  val refined           = "eu.timepit"             %% "refined"                 % V.refined
 
   // streams
   val fs2Kafka = "com.github.fd4s" %% "fs2-kafka"           % V.fs2Kafka
@@ -71,14 +76,15 @@ object Dependencies {
     .exclude("software.amazon.glue", "schema-registry-build-tools")
     .exclude("software.amazon.glue", "schema-registry-common")
     .exclude("software.amazon.glue", "schema-registry-serde")
-  val arnsSdk2            = "software.amazon.awssdk" % "arns"                       % V.awsSdk2
-  val kinesisSdk2         = "software.amazon.awssdk" % "kinesis"                    % V.awsSdk2
-  val dynamoDbSdk2        = "software.amazon.awssdk" % "dynamodb"                   % V.awsSdk2
-  val cloudwatchSdk2      = "software.amazon.awssdk" % "cloudwatch"                 % V.awsSdk2
-  val catsEffectTestingIt = "org.typelevel"         %% "cats-effect-testkit"        % V.catsEffect
-  val catsEffectSpecs2It  = "org.typelevel"         %% "cats-effect-testing-specs2" % V.catsEffectSpecs2
-  val localstackIt        = "org.testcontainers"     % "localstack"                 % V.localstack
-  val slf4jIt             = "org.slf4j"              % "slf4j-simple"               % V.slf4j
+  val arnsSdk2            = "software.amazon.awssdk"  % "arns"                       % V.awsSdk2
+  val kinesisSdk2         = "software.amazon.awssdk"  % "kinesis"                    % V.awsSdk2
+  val dynamoDbSdk2        = "software.amazon.awssdk"  % "dynamodb"                   % V.awsSdk2
+  val cloudwatchSdk2      = "software.amazon.awssdk"  % "cloudwatch"                 % V.awsSdk2
+  val kinesisClient       = "software.amazon.kinesis" % "amazon-kinesis-client"      % V.kinesisClient
+  val catsEffectTestingIt = "org.typelevel"          %% "cats-effect-testkit"        % V.catsEffect
+  val catsEffectSpecs2It  = "org.typelevel"          %% "cats-effect-testing-specs2" % V.catsEffectSpecs2
+  val localstackIt        = "org.testcontainers"      % "localstack"                 % V.localstack
+  val slf4jIt             = "org.slf4j"               % "slf4j-simple"               % V.slf4j
 
   // java
   val slf4jSimple   = "org.slf4j" % "slf4j-simple"   % V.slf4j
@@ -116,11 +122,13 @@ object Dependencies {
   )
 
   val kinesisDependencies = Seq(
+    kinesisClient,
     fs2AwsKinesis,
     arnsSdk2,
     kinesisSdk2,
     dynamoDbSdk2,
     cloudwatchSdk2,
+    refined,
     circeConfig,
     circeGeneric,
     circeGenericExtra,
@@ -145,7 +153,8 @@ object Dependencies {
   val pubsubDependencies = Seq(
     pubsub,
     circeConfig,
-    circeGeneric
+    circeGeneric,
+    collectionCompat
   )
 
   val loadersCommonDependencies = Seq(
