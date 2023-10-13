@@ -35,7 +35,7 @@ object Dependencies {
     val sentry   = "6.25.2"
 
     // Snowplow
-    val schemaDdl    = "0.21.0-M1"
+    val schemaDdl    = "0.21.0"
     val badrows      = "2.2.1"
     val igluClient   = "3.1.0"
     val tracker      = "2.0.0"
