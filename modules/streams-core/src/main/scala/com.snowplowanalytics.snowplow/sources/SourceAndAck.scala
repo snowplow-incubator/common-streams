@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.sources
 
 import fs2.Stream
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * The machinery for sourcing events from and external stream and then acking/checkpointing them.
@@ -30,4 +31,16 @@ trait SourceAndAck[F[_]] {
    *   A stream which should be compiled and drained
    */
   def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing]
+
+  /**
+   * Measurement of how long the EventProcessor has spent processing any pending un-acked events.
+   *
+   * Note, unlike our statsd metrics, this measurement does not consider min/max values over a
+   * period of time. It is a snapshot measurement for a single point in time.
+   *
+   * This measurement is designed to be used as a health probe. If events are getting processed
+   * quickly then latency is low and the probe should report healthy. If any event is "stuck" then
+   * latency is high and the probe should report unhealthy.
+   */
+  def processingLatency: F[FiniteDuration]
 }

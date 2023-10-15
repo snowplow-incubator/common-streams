@@ -55,8 +55,9 @@ class KinesisSourceSpec
       t2 <- IO.realTimeInstant
       processingConfig = new EventProcessingConfig(NoWindowing)
       kinesisConfig    = getKinesisConfig(testStream1Name)
-      sourceAndAck     = KinesisSource.build[IO](kinesisConfig).stream(processingConfig, testProcessor(refProcessed))
-      fiber <- sourceAndAck.compile.drain.start
+      sourceAndAck <- KinesisSource.build[IO](kinesisConfig)
+      stream = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
+      fiber <- stream.compile.drain.start
       _ <- IO.sleep(2.minutes)
       processed <- refProcessed.get
       _ <- fiber.cancel

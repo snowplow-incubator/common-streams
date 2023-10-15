@@ -15,7 +15,7 @@ import fs2.Stream
 import org.specs2.Specification
 import org.specs2.matcher.Matcher
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{Duration, DurationInt}
 
 import java.nio.charset.StandardCharsets
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, TokenedEvents}
@@ -36,6 +36,12 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       process and checkpoint events in timed windows $e4
       cleanly checkpoint pending window when a stream is interrupted $e5
       not checkpoint events if the event processor throws an exception $e6
+
+    When reporting processing latency
+      report zero latency when there are no events $e7
+      report non-zero latency while there are unprocessed events $e8
+      report non-zero latency if events are slow to be acked $e9
+      report zero latency after all events have been processed and acked $e10
   """
 
   def e1 = {
@@ -50,8 +56,8 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val io = for {
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
       refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor    = testProcessor(refProcessed)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      processor = testProcessor(refProcessed)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(durationToTest)
       checkpointed <- refCheckpoints.get
@@ -79,8 +85,8 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val io = for {
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
       refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor    = testProcessor(refProcessed)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      processor = testProcessor(refProcessed)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(durationToTest) // Not enough time to finish processing the first batch
       _ <- fiber.cancel // This should wait for the first batch to finish processing
@@ -118,8 +124,8 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val io = for {
       refProcessed <- Ref[IO].of[List[String]](Nil)
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      processor    = badProcessor(refProcessed)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      processor = badProcessor(refProcessed)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
       result <- sourceAndAck.stream(config, processor).compile.drain.attempt
       checkpointed <- refCheckpoints.get
       processed <- refProcessed.get
@@ -148,8 +154,8 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val io = for {
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
       refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor    = windowedProcessor(refProcessed)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      processor = windowedProcessor(refProcessed)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(durationToTest)
       checkpointed <- refCheckpoints.get
@@ -177,8 +183,8 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val io = for {
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
       refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor    = windowedProcessor(refProcessed)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      processor = windowedProcessor(refProcessed)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(durationToTest) // Not enough time to finish processing the first batch
       _ <- fiber.cancel // This should wait for the first batch to finish processing
@@ -204,11 +210,121 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val io = for {
       refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      sourceAndAck = LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
       result <- sourceAndAck.stream(config, badProcessor).compile.drain.attempt
       checkpointed <- refCheckpoints.get
     } yield (result must beLeft) and
       (checkpointed must beEmpty)
+
+    TestControl.executeEmbed(io)
+  }
+
+  def e7 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    // A source that emits nothing
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit]                 = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.never[IO]
+    }
+
+    val io = for {
+      refProcessed <- Ref[IO].of[List[String]](Nil)
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      processor = testProcessor(refProcessed)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(1.hour)
+      latency <- sourceAndAck.processingLatency
+      _ <- fiber.cancel
+    } yield latency must beEqualTo(Duration.Zero)
+
+    TestControl.executeEmbed(io)
+  }
+
+  def e8 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    // A source that repeatedly emits a batch
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
+        Stream.emit(LowLevelEvents(Nil, (), None)).repeat
+      }
+    }
+
+    // A processor which takes 1 hour to process each batch
+    val processor: EventProcessor[IO] =
+      _.evalMap { case TokenedEvents(_, token, _) =>
+        IO.sleep(1.hour).as(token)
+      }
+
+    val io = for {
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(5.minutes)
+      latency <- sourceAndAck.processingLatency
+      _ <- fiber.cancel
+    } yield latency must beEqualTo(5.minutes)
+
+    TestControl.executeEmbed(io)
+  }
+
+  def e9 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    // A source that repeatedly emits a batch, but takes 1 hour to ack.
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.sleep(1.hour))
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
+        Stream.emit(LowLevelEvents(Nil, (), None)).repeat
+      }
+    }
+
+    // A processor which takes 1 minute to process each batch
+    val processor: EventProcessor[IO] =
+      _.evalMap { case TokenedEvents(_, token, _) =>
+        IO.sleep(1.minute).as(token)
+      }
+
+    val io = for {
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(5.minutes)
+      latency <- sourceAndAck.processingLatency
+      _ <- fiber.cancel
+    } yield latency must beEqualTo(5.minutes)
+
+    TestControl.executeEmbed(io)
+  }
+
+  def e10 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    // A source that emits one batch and then nothing forevermore
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
+        Stream.emit(LowLevelEvents(Nil, (), None)) ++ Stream.never[IO]
+      }
+    }
+
+    // A processor which takes 1 minute to process each batch
+    val processor: EventProcessor[IO] =
+      _.evalMap { case TokenedEvents(_, token, _) =>
+        IO.sleep(1.minute).as(token)
+      }
+
+    val io = for {
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(5.minutes)
+      latency <- sourceAndAck.processingLatency
+      _ <- fiber.cancel
+    } yield latency must beEqualTo(Duration.Zero)
 
     TestControl.executeEmbed(io)
   }

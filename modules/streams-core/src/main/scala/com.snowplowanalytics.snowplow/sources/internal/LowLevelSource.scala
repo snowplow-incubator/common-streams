@@ -17,7 +17,7 @@ import fs2.{Pipe, Pull, Stream}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
 
 /**
@@ -53,13 +53,31 @@ private[sources] object LowLevelSource {
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
   /**
+   * The checkpointable item `C` along with the time we started to process this batch of events *
+   */
+  private case class TimestampedAck[C](timestamp: FiniteDuration, ack: C)
+
+  /**
+   * Mutable state held by the SourceAndAck implementation
+   *
+   * Map is keyed by Token, corresponding to a batch of `TokenedEvents`. Map values are time the
+   * token got added to the map and a `C` which is how to ack/checkpoint the batch.
+   */
+  private type State[C] = Map[Unique.Token, TimestampedAck[C]]
+
+  /**
    * Lifts the internal [[LowLevelSource]] into a [[SourceAndAck]], which is the public API of this
    * library
    */
-  def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): SourceAndAck[F] = new SourceAndAck[F] {
+  def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
+    Ref[F].of(Map.empty[Unique.Token, TimestampedAck[C]]).map { ref =>
+      sourceAndAckImpl(source, ref)
+    }
+
+  private def sourceAndAckImpl[F[_]: Async, C](source: LowLevelSource[F, C], ref: Ref[F, State[C]]): SourceAndAck[F] = new SourceAndAck[F] {
     def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] =
-      source.stream.flatMap { s2 =>
-        Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _)).flatMap { ref =>
+      source.stream
+        .flatMap { s2 =>
           val tokenedSources = s2
             .through(tokened(ref))
             .through(windowed(config.windowing))
@@ -73,13 +91,24 @@ private[sources] object LowLevelSource {
             .map { case (tokenedSource, sink) => sink(tokenedSource) }
             .parJoin(2) // so we start processing the next window while the previous window is still finishing up.
         }
-      }
+        .onFinalize(nackUnhandled(source.checkpointer, ref))
+
+    def processingLatency: F[FiniteDuration] =
+      for {
+        state <- ref.get
+        now <- Async[F].realTime
+      } yield
+        if (state.isEmpty)
+          Duration.Zero
+        else {
+          now - state.values.map(_.timestamp).min
+        }
   }
 
-  private def nackUnhandled[F[_]: Monad, C](checkpointer: Checkpointer[F, C], ref: Ref[F, Map[Unique.Token, C]]): F[Unit] =
+  private def nackUnhandled[F[_]: Monad, C](checkpointer: Checkpointer[F, C], ref: Ref[F, State[C]]): F[Unit] =
     ref.get
       .flatMap { map =>
-        checkpointer.nack(checkpointer.combineAll(map.values.toSeq))
+        checkpointer.nack(checkpointer.combineAll(map.values.map(_.ack).toSeq))
       }
 
   /**
@@ -87,11 +116,12 @@ private[sources] object LowLevelSource {
    *
    * The token can later be exchanged for the original checkpointable item
    */
-  private def tokened[F[_]: Unique: Monad, C](ref: Ref[F, Map[Unique.Token, C]]): Pipe[F, LowLevelEvents[C], TokenedEvents] =
+  private def tokened[F[_]: Sync, C](ref: Ref[F, State[C]]): Pipe[F, LowLevelEvents[C], TokenedEvents] =
     _.evalMap { case LowLevelEvents(events, ack, earliestSourceTstamp) =>
       for {
         token <- Unique[F].unique
-        _ <- ref.update(_ + (token -> ack))
+        now <- Sync[F].realTime
+        _ <- ref.update(_ + (token -> TimestampedAck(now, ack)))
       } yield TokenedEvents(events, token, earliestSourceTstamp)
     }
 
@@ -117,7 +147,7 @@ private[sources] object LowLevelSource {
    */
   private def messageSink[F[_]: Async, C](
     processor: EventProcessor[F],
-    ref: Ref[F, Map[Unique.Token, C]],
+    ref: Ref[F, State[C]],
     checkpointer: Checkpointer[F, C],
     control: EagerWindows.Control[F]
   ): Pipe[F, TokenedEvents, Nothing] =
@@ -137,8 +167,8 @@ private[sources] object LowLevelSource {
                 (map - token, map.get(token))
               }
               .flatMap {
-                case Some(c) => Async[F].pure(c)
-                case None    => Async[F].raiseError[C](new IllegalStateException("Missing checkpoint for token"))
+                case Some(TimestampedAck(_, c)) => Async[F].pure(c)
+                case None                       => Async[F].raiseError[C](new IllegalStateException("Missing checkpoint for token"))
               }
           }
           .flatMap { cs =>

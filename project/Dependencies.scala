@@ -35,7 +35,6 @@ object Dependencies {
     // java
     val slf4j    = "2.0.9"
     val azureSdk = "1.9.1"
-    val sentry   = "6.25.2"
 
     // Snowplow
     val schemaDdl    = "0.21.0"
@@ -90,18 +89,16 @@ object Dependencies {
   val slf4jSimple   = "org.slf4j" % "slf4j-simple"   % V.slf4j
   val slf4jApi      = "org.slf4j" % "slf4j-api"      % V.slf4j
   val azureIdentity = "com.azure" % "azure-identity" % V.azureSdk
-  val sentry        = "io.sentry" % "sentry"         % V.sentry
 
   // transitive overrides
   val snappy = "org.xerial.snappy" % "snappy-java" % V.snappy
 
-  val badrows          = "com.snowplowanalytics" %% "snowplow-badrows"                      % V.badrows
-  val tracker          = "com.snowplowanalytics" %% "snowplow-scala-tracker-core"           % V.tracker
-  val trackerEmit      = "com.snowplowanalytics" %% "snowplow-scala-tracker-emitter-http4s" % V.tracker
-  val schemaDdl        = "com.snowplowanalytics" %% "schema-ddl"                            % V.schemaDdl
-  val igluClient       = "com.snowplowanalytics" %% "iglu-scala-client"                     % V.igluClient
-  val igluClientHttp4s = "com.snowplowanalytics" %% "iglu-scala-client-http4s"              % V.igluClient
-  val analyticsSdk     = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.analyticsSdk
+  val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"                      % V.badrows
+  val tracker      = "com.snowplowanalytics" %% "snowplow-scala-tracker-core"           % V.tracker
+  val trackerEmit  = "com.snowplowanalytics" %% "snowplow-scala-tracker-emitter-http4s" % V.tracker
+  val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                            % V.schemaDdl
+  val igluClient   = "com.snowplowanalytics" %% "iglu-scala-client"                     % V.igluClient
+  val analyticsSdk = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.analyticsSdk
 
   // tests
   val specs2            = "org.specs2"    %% "specs2-core"                % V.specs2           % Test

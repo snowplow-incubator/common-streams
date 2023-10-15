@@ -41,7 +41,7 @@ object KinesisSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Parallel: Async](config: KinesisSourceConfig): SourceAndAck[F] =
+  def build[F[_]: Parallel: Async](config: KinesisSourceConfig): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck(lowLevel(config))
 
   private type KinesisCheckpointer[F[_]] = Checkpointer[F, Map[String, KinesisMetadata[F]]]

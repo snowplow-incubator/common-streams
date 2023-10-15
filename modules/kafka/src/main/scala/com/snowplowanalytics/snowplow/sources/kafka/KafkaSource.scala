@@ -30,7 +30,7 @@ object KafkaSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Async](config: KafkaSourceConfig): SourceAndAck[F] =
+  def build[F[_]: Async](config: KafkaSourceConfig): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck(lowLevel(config))
 
   private def lowLevel[F[_]: Async](config: KafkaSourceConfig): LowLevelSource[F, KafkaCheckpoints[F]] =

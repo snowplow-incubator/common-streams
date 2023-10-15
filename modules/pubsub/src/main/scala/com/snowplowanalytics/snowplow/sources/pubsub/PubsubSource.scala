@@ -43,7 +43,7 @@ object PubsubSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Async](config: PubsubSourceConfig): SourceAndAck[F] =
+  def build[F[_]: Async](config: PubsubSourceConfig): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck(lowLevel(config))
 
   private type PubSubCheckpointer[F[_]] = Checkpointer[F, List[AckReplyConsumerWithResponse]]
