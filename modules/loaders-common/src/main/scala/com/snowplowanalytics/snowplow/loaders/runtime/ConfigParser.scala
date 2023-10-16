@@ -8,14 +8,12 @@
 package com.snowplowanalytics.snowplow.loaders.runtime
 
 import cats.data.EitherT
-import cats.effect.{ExitCode, Sync}
+import cats.effect.Sync
 import cats.implicits._
 import com.snowplowanalytics.iglu.client.resolver.Resolver
 import com.typesafe.config.{Config => TypesafeConfig, ConfigFactory}
 import io.circe.{Decoder, Json}
 import io.circe.config.syntax.CirceConfigOps
-import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
-import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scala.jdk.CollectionConverters._
 
@@ -23,32 +21,41 @@ import java.nio.file.{Files, Path}
 
 object ConfigParser {
 
-  private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
-
-  def igluResolverFromFile[F[_]: Sync](path: Path): EitherT[F, ExitCode, Resolver.ResolverConfig] =
+  /**
+   * Parse Iglu resolver config from a file, or return an appropriate error message
+   *
+   * @param path
+   *   The location of the file
+   * @return
+   *   The parsed config, or an appropriate error message to display to the end user
+   */
+  def igluResolverFromFile[F[_]: Sync](path: Path): EitherT[F, String, Resolver.ResolverConfig] =
     for {
       resolverJson <- configFromFile[F, Json](path)
       resolver <- resolverFromJson(resolverJson)
     } yield resolver
 
-  def configFromFile[F[_]: Sync, A: Decoder](path: Path): EitherT[F, ExitCode, A] = {
-    val eitherT = for {
+  /**
+   * Parse the application config from a file, or return an appropriate error message
+   *
+   * @tparam A
+   *   The application-specific config class
+   * @param path
+   *   The location of the file
+   * @return
+   *   The parsed config, or an appropriate error message to display to the end user
+   */
+  def configFromFile[F[_]: Sync, A: Decoder](path: Path): EitherT[F, String, A] =
+    for {
       text <- EitherT(readTextFrom[F](path))
       hocon <- EitherT.fromEither[F](hoconFromString(text))
       result <- EitherT.fromEither[F](resolve(hocon))
     } yield result
 
-    eitherT.leftSemiflatMap { str =>
-      Logger[F].error(str).as(ExitCode.Error)
-    }
-  }
-
-  private def resolverFromJson[F[_]: Sync](json: Json): EitherT[F, ExitCode, Resolver.ResolverConfig] =
+  private def resolverFromJson[F[_]: Sync](json: Json): EitherT[F, String, Resolver.ResolverConfig] =
     EitherT
       .fromEither[F](Resolver.parseConfig(json))
-      .leftSemiflatMap { e =>
-        LogUtils.prettyLogException(e).as(ExitCode.Error)
-      }
+      .leftMap(_.show)
 
   private def readTextFrom[F[_]: Sync](path: Path): F[Either[String, String]] =
     Sync[F].blocking {

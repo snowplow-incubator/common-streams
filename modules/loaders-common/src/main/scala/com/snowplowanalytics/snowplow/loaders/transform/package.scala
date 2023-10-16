@@ -11,11 +11,11 @@ import cats.Order
 import com.snowplowanalytics.iglu.core.{SchemaKey, SelfDescribingSchema}
 import com.snowplowanalytics.iglu.schemaddl.jsonschema.Schema
 
-package object common {
+package object transform {
 
-  private[common] implicit val orderingSchemaKey: Ordering[SchemaKey] = SchemaKey.ordering
+  private[transform] implicit val orderingSchemaKey: Ordering[SchemaKey] = SchemaKey.ordering
 
-  private[common] implicit val orderSDS: Order[SelfDescribingSchema[Schema]] =
+  private[transform] implicit val orderSDS: Order[SelfDescribingSchema[Schema]] =
     Order.fromOrdering[SelfDescribingSchema[Schema]](
       Ordering.by(_.self.schemaKey)
     )

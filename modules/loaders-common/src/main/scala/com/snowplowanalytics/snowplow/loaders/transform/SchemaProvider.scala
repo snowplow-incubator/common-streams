@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.loaders.common
+package com.snowplowanalytics.snowplow.loaders.transform
 
 import cats.data.{EitherT, NonEmptyList}
 import cats.effect.Sync
@@ -19,7 +19,7 @@ import com.snowplowanalytics.snowplow.badrows.FailureDetails
 
 import scala.math.Ordered._
 
-object SchemaProvider {
+private[transform] object SchemaProvider {
 
   private def getSchema[F[_]: Sync: RegistryLookup](
     resolver: Resolver[F],
@@ -31,6 +31,7 @@ object SchemaProvider {
       schema <- EitherT.fromOption[F](Schema.parse(json), parseSchemaBadRow(schemaKey))
     } yield SelfDescribingSchema(SchemaMap(schemaKey), schema)
 
+  // Note schema order of the returned list is not guaranteed
   def fetchSchemasWithSameModel[F[_]: Sync: RegistryLookup](
     resolver: Resolver[F],
     schemaKey: SchemaKey

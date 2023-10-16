@@ -5,16 +5,16 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.loaders.common
+package com.snowplowanalytics.snowplow.loaders.transform
 
 import cats.data.NonEmptyList
 import cats.implicits._
+import io.circe.syntax._
 import com.snowplowanalytics.iglu.core.{SchemaKey, SelfDescribingSchema}
 import com.snowplowanalytics.iglu.schemaddl.jsonschema.Schema
 import com.snowplowanalytics.iglu.schemaddl.parquet.{Field, Migrations, Type}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.{Data => SdkData, SnowplowEvent}
-
-import scala.math.abs
+import com.snowplowanalytics.iglu.schemaddl.jsonschema.circe.implicits._
 
 /**
  * Field type information for a family of versioned Iglu schemas which are treated as a common
@@ -53,7 +53,7 @@ object TypedTabledEntity {
    * @param schemas
    *   Iglu schemas pre-fetched from Iglu Server
    */
-  def build(
+  private[transform] def build(
     tabledEntity: TabledEntity,
     subVersions: Set[SchemaSubVersion],
     schemas: NonEmptyList[SelfDescribingSchema[Schema]]
@@ -61,13 +61,14 @@ object TypedTabledEntity {
     // Schemas need to be ordered by key to merge in correct order.
     val NonEmptyList(root, tail) = schemas.sorted
     val tte = tail
-      .map(selfDescribingSchema => (fieldFromSchema(tabledEntity, selfDescribingSchema.schema), selfDescribingSchema.self.schemaKey))
-      .foldLeft(initColumnGroup(tabledEntity, root)) { case (columnGroup, (field, schemaKey)) =>
+      .foldLeft(initColumnGroup(tabledEntity, root)) { case (columnGroup, selfDescribingSchema) =>
+        val field      = fieldFromSchema(tabledEntity, selfDescribingSchema.schema)
+        val schemaKey  = selfDescribingSchema.self.schemaKey
         val subversion = keyToSubVersion(schemaKey)
         Migrations.mergeSchemas(columnGroup.mergedField, field) match {
           case Left(_) =>
             if (subVersions.contains(subversion)) {
-              val hash = abs(field.hashCode())
+              val hash = "%08x".format(selfDescribingSchema.schema.asJson.noSpaces.hashCode())
               // typedField always has a single element in matchingKeys
               val recoverPoint = schemaKey.version.asString.replaceAll("-", "_")
               val newName      = s"${field.name}_recovered_${recoverPoint}_$hash"
@@ -93,7 +94,7 @@ object TypedTabledEntity {
     }
     val fieldName = SnowplowEvent.transformSchema(sdkEntityType, tabledEntity.vendor, tabledEntity.schemaName, tabledEntity.model)
 
-    tabledEntity.entityType match {
+    val field = tabledEntity.entityType match {
       case TabledEntity.UnstructEvent =>
         Field.normalize {
           Field.build(fieldName, schema, enforceValuePresence = false)
@@ -107,6 +108,9 @@ object TypedTabledEntity {
           }
         }
     }
+
+    // Accessors are meaningless for a schema's top-level field
+    field.copy(accessors = Set.empty)
   }
 
   private def keyToSubVersion(key: SchemaKey): SchemaSubVersion = (key.version.revision, key.version.addition)

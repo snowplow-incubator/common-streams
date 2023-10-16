@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.loaders.common
+package com.snowplowanalytics.snowplow.loaders.transform
 
 import cats.effect.Sync
 import cats.implicits._
@@ -45,7 +45,6 @@ object NonAtomicFields {
     failure: FailureDetails.LoaderIgluError
   )
 
-  // TODO: does this belong here?
   def resolveTypes[F[_]: Sync: RegistryLookup](
     resolver: Resolver[F],
     entities: Map[TabledEntity, Set[SchemaSubVersion]]
