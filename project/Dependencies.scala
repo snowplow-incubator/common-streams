@@ -154,23 +154,29 @@ object Dependencies {
     collectionCompat
   )
 
+  val runtimeCommonDependencies = Seq(
+    cats,
+    catsEffectKernel,
+    circeConfig,
+    emberServer,
+    fs2,
+    igluClient,
+    log4cats,
+    slf4jApi,
+    tracker,
+    trackerEmit
+  )
+
   val loadersCommonDependencies = Seq(
     cats,
     catsEffectKernel,
     schemaDdl,
     badrows,
-    circeConfig,
     circeLiteral % Test,
-    emberServer,
-    fs2,
     igluClient,
-    log4cats,
-    tracker,
-    trackerEmit,
     analyticsSdk,
     specs2,
     catsEffectSpecs2,
-    slf4jApi,
     slf4jSimple % Test
   )
 }
