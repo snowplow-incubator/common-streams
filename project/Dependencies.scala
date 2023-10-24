@@ -71,19 +71,21 @@ object Dependencies {
   val fs2Kafka = "com.github.fd4s" %% "fs2-kafka"           % V.fs2Kafka
   val pubsub   = "com.google.cloud" % "google-cloud-pubsub" % V.pubsub
   val fs2AwsKinesis = ("io.laserdisc" %% "fs2-aws-kinesis" % V.fs2AwsKinesis)
+    .exclude("software.amazon.kinesis", "amazon-kinesis-client")
+    .exclude("com.amazonaws", "amazon-kinesis-producer")
+  val arnsSdk2       = "software.amazon.awssdk" % "arns"       % V.awsSdk2
+  val kinesisSdk2    = "software.amazon.awssdk" % "kinesis"    % V.awsSdk2
+  val dynamoDbSdk2   = "software.amazon.awssdk" % "dynamodb"   % V.awsSdk2
+  val cloudwatchSdk2 = "software.amazon.awssdk" % "cloudwatch" % V.awsSdk2
+  val kinesisClient = ("software.amazon.kinesis" % "amazon-kinesis-client" % V.kinesisClient)
     .exclude("com.amazonaws", "amazon-kinesis-producer")
     .exclude("software.amazon.glue", "schema-registry-build-tools")
     .exclude("software.amazon.glue", "schema-registry-common")
     .exclude("software.amazon.glue", "schema-registry-serde")
-  val arnsSdk2            = "software.amazon.awssdk"  % "arns"                       % V.awsSdk2
-  val kinesisSdk2         = "software.amazon.awssdk"  % "kinesis"                    % V.awsSdk2
-  val dynamoDbSdk2        = "software.amazon.awssdk"  % "dynamodb"                   % V.awsSdk2
-  val cloudwatchSdk2      = "software.amazon.awssdk"  % "cloudwatch"                 % V.awsSdk2
-  val kinesisClient       = "software.amazon.kinesis" % "amazon-kinesis-client"      % V.kinesisClient
-  val catsEffectTestingIt = "org.typelevel"          %% "cats-effect-testkit"        % V.catsEffect
-  val catsEffectSpecs2It  = "org.typelevel"          %% "cats-effect-testing-specs2" % V.catsEffectSpecs2
-  val localstackIt        = "org.testcontainers"      % "localstack"                 % V.localstack
-  val slf4jIt             = "org.slf4j"               % "slf4j-simple"               % V.slf4j
+  val catsEffectTestingIt = "org.typelevel"     %% "cats-effect-testkit"        % V.catsEffect
+  val catsEffectSpecs2It  = "org.typelevel"     %% "cats-effect-testing-specs2" % V.catsEffectSpecs2
+  val localstackIt        = "org.testcontainers" % "localstack"                 % V.localstack
+  val slf4jIt             = "org.slf4j"          % "slf4j-simple"               % V.slf4j
 
   // java
   val slf4jSimple   = "org.slf4j" % "slf4j-simple"   % V.slf4j
