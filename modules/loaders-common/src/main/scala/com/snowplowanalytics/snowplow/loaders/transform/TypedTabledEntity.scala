@@ -118,10 +118,9 @@ object TypedTabledEntity {
   private def addSchemaVersionKey(field: Field): Field = {
     val fieldType = field.fieldType match {
       case arr @ Type.Array(struct @ Type.Struct(subFields), _) =>
-        val fixedFields = // Our special key takes priority over a key of the same name in the schema
-          Field("_schema_version", Type.String, Type.Nullability.Required) +: subFields.filter(
-            _.name =!= "_schema_version"
-          )
+        val fixedFields = subFields
+          .filter(_.name =!= "_schema_version") // Our special key takes priority over a key of the same name in the schema
+          .prepended(Field("_schema_version", Type.String, Type.Nullability.Required))
         arr.copy(element = struct.copy(fields = fixedFields))
       case other =>
         // This is OK. It must be a weird schema, whose root type is not an object.

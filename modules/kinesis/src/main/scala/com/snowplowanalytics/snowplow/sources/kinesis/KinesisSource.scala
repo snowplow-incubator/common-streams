@@ -140,10 +140,8 @@ object KinesisSource {
       .map { chunk =>
         val ack = chunk.toList
           .groupBy(_.shardId)
-          .iterator
-          .map { case (k, records) =>
-            k -> records.maxBy(_.sequenceNumber).toMetadata[F]
-          }
+          .view
+          .mapValues(_.maxBy(_.sequenceNumber).toMetadata[F])
           .toMap
         val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).min
         LowLevelEvents(chunk.toList.map(_.record.data()), ack, Some(earliestTstamp))
