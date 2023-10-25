@@ -40,7 +40,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     When reporting processing latency
       report zero latency when there are no events $e7
       report non-zero latency while there are unprocessed events $e8
-      report non-zero latency if events are slow to be acked $e9
+      report zero latency if events are processed but not yet acked (e.g. a batch-oriented loader) $e9
       report zero latency after all events have been processed and acked $e10
   """
 
@@ -275,27 +275,25 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    // A source that repeatedly emits a batch, but takes 1 hour to ack.
+    // A source that repeatedly emits a batch
     val lowLevelSource = new LowLevelSource[IO, Unit] {
-      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.sleep(1.hour))
+      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
         Stream.emit(LowLevelEvents(Nil, (), None)).repeat
       }
     }
 
-    // A processor which takes 1 minute to process each batch
+    // A processor which takes 1 minute to process each batch, but does not emit the token (i.e. does not ack the batch)
     val processor: EventProcessor[IO] =
-      _.evalMap { case TokenedEvents(_, token, _) =>
-        IO.sleep(1.minute).as(token)
-      }
+      _.evalMap(_ => IO.sleep(1.minute)).drain.covaryOutput
 
     val io = for {
       sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(5.minutes)
+      _ <- IO.sleep(342.seconds)
       latency <- sourceAndAck.processingLatency
       _ <- fiber.cancel
-    } yield latency must beEqualTo(5.minutes)
+    } yield latency must beEqualTo(42.seconds)
 
     TestControl.executeEmbed(io)
   }

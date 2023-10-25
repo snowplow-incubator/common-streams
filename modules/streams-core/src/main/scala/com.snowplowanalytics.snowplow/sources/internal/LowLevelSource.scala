@@ -53,37 +53,47 @@ private[sources] object LowLevelSource {
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
   /**
-   * The checkpointable item `C` along with the time we started to process this batch of events *
-   */
-  private case class TimestampedAck[C](timestamp: FiniteDuration, ack: C)
-
-  /**
    * Mutable state held by the SourceAndAck implementation
    *
-   * Map is keyed by Token, corresponding to a batch of `TokenedEvents`. Map values are time the
-   * token got added to the map and a `C` which is how to ack/checkpoint the batch.
+   * Map is keyed by Token, corresponding to a batch of `TokenedEvents`. Map values are `C`s which
+   * is how to ack/checkpoint the batch.
    */
-  private type State[C] = Map[Unique.Token, TimestampedAck[C]]
+  private type State[C] = Map[Unique.Token, C]
+
+  /**
+   * Mutable state used for measuring the event-processing latency from this source
+   *
+   * For the batch that was last emitted downstream for processing, the `Option[FiniteDuration]`
+   * represents the real time (since epoch) that the batch was emitted. If it is None then there is
+   * no batch currently being processed.
+   */
+  private type LatencyRef[F[_]] = Ref[F, Option[FiniteDuration]]
 
   /**
    * Lifts the internal [[LowLevelSource]] into a [[SourceAndAck]], which is the public API of this
    * library
    */
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
-    Ref[F].of(Map.empty[Unique.Token, TimestampedAck[C]]).map { ref =>
-      sourceAndAckImpl(source, ref)
-    }
+    for {
+      acksRef <- Ref[F].of(Map.empty[Unique.Token, C])
+      latencyRef <- Ref[F].of(Option.empty[FiniteDuration])
+    } yield sourceAndAckImpl(source, acksRef, latencyRef)
 
-  private def sourceAndAckImpl[F[_]: Async, C](source: LowLevelSource[F, C], ref: Ref[F, State[C]]): SourceAndAck[F] = new SourceAndAck[F] {
+  private def sourceAndAckImpl[F[_]: Async, C](
+    source: LowLevelSource[F, C],
+    acksRef: Ref[F, State[C]],
+    latencyRef: LatencyRef[F]
+  ): SourceAndAck[F] = new SourceAndAck[F] {
     def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] =
       source.stream
         .flatMap { s2 =>
           val tokenedSources = s2
-            .through(tokened(ref))
+            .through(monitorLatency(latencyRef))
+            .through(tokened(acksRef))
             .through(windowed(config.windowing))
 
           val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
-            CleanCancellation(messageSink(processor, ref, source.checkpointer, control))
+            CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control))
           }
 
           tokenedSources
@@ -91,24 +101,22 @@ private[sources] object LowLevelSource {
             .map { case (tokenedSource, sink) => sink(tokenedSource) }
             .parJoin(2) // so we start processing the next window while the previous window is still finishing up.
         }
-        .onFinalize(nackUnhandled(source.checkpointer, ref))
+        .onFinalize(nackUnhandled(source.checkpointer, acksRef))
 
     def processingLatency: F[FiniteDuration] =
-      for {
-        state <- ref.get
-        now <- Async[F].realTime
-      } yield
-        if (state.isEmpty)
-          Duration.Zero
-        else {
-          now - state.values.map(_.timestamp).min
-        }
+      latencyRef.get.flatMap {
+        case None => Duration.Zero.pure[F]
+        case Some(lastPullTime) =>
+          Async[F].realTime.map { now =>
+            now - lastPullTime
+          }
+      }
   }
 
   private def nackUnhandled[F[_]: Monad, C](checkpointer: Checkpointer[F, C], ref: Ref[F, State[C]]): F[Unit] =
     ref.get
       .flatMap { map =>
-        checkpointer.nack(checkpointer.combineAll(map.values.map(_.ack).toSeq))
+        checkpointer.nack(checkpointer.combineAll(map.values))
       }
 
   /**
@@ -120,10 +128,31 @@ private[sources] object LowLevelSource {
     _.evalMap { case LowLevelEvents(events, ack, earliestSourceTstamp) =>
       for {
         token <- Unique[F].unique
-        now <- Sync[F].realTime
-        _ <- ref.update(_ + (token -> TimestampedAck(now, ack)))
+        _ <- ref.update(_ + (token -> ack))
       } yield TokenedEvents(events, token, earliestSourceTstamp)
     }
+
+  /**
+   * An fs2 Pipe which records what time (duration since epoch) we last emitted a batch downstream
+   * for processing
+   */
+  private def monitorLatency[F[_]: Sync, A](ref: Ref[F, Option[FiniteDuration]]): Pipe[F, A, A] = {
+
+    def go(source: Stream[F, A]): Pull[F, A, Unit] =
+      source.pull.uncons1.flatMap {
+        case None => Pull.done
+        case Some((pulled, source)) =>
+          for {
+            now <- Pull.eval(Sync[F].realTime)
+            _ <- Pull.eval(ref.set(Some(now)))
+            _ <- Pull.output1(pulled)
+            _ <- Pull.eval(ref.set(None))
+            _ <- go(source)
+          } yield ()
+      }
+
+    source => go(source).stream
+  }
 
   /**
    * An fs2 Pipe which feeds tokened messages into the [[EventProcessor]] and invokes the
@@ -167,8 +196,8 @@ private[sources] object LowLevelSource {
                 (map - token, map.get(token))
               }
               .flatMap {
-                case Some(TimestampedAck(_, c)) => Async[F].pure(c)
-                case None                       => Async[F].raiseError[C](new IllegalStateException("Missing checkpoint for token"))
+                case Some(c) => Async[F].pure(c)
+                case None    => Async[F].raiseError[C](new IllegalStateException("Missing checkpoint for token"))
               }
           }
           .flatMap { cs =>
