@@ -24,16 +24,21 @@ abstract class Metrics[F[_]: Async, S <: Metrics.State](
   emptyState: S,
   config: Option[Metrics.StatsdConfig]
 ) {
-  def report: Stream[F, Nothing] = {
-    val stream = for {
-      reporters <- Stream.resource(Metrics.makeReporters[F](config))
-      _ <- Stream.fixedDelay[F](config.fold(1.minute)(_.period))
-      state <- Stream.eval(ref.getAndSet(emptyState))
-      kv = state.toKVMetrics
-      _ <- Stream.eval(reporters.traverse(_.report(kv)))
-    } yield ()
-    stream.drain
-  }
+  def report: Stream[F, Nothing] =
+    Stream.resource(Metrics.makeReporters[F](config)).flatMap { reporters =>
+      def report = for {
+        state <- ref.getAndSet(emptyState)
+        kv = state.toKVMetrics
+        _ <- reporters.traverse(_.report(kv))
+      } yield ()
+
+      val stream = for {
+        _ <- Stream.fixedDelay[F](config.fold(1.minute)(_.period))
+        _ <- Stream.eval(report)
+      } yield ()
+
+      stream.drain.onFinalize(report)
+    }
 }
 
 object Metrics {
