@@ -112,7 +112,7 @@ object KinesisSink {
 
   private def toKinesisRecords(records: List[Sinkable]): List[PutRecordsRequestEntry] =
     records.map { r =>
-      val data = SdkBytes.fromByteArray(r.bytes)
+      val data = SdkBytes.fromByteArrayUnsafe(r.bytes)
       val prre = PutRecordsRequestEntry
         .builder()
         .partitionKey(r.partitionKey.getOrElse(UUID.randomUUID.toString()))
@@ -251,7 +251,7 @@ object KinesisSink {
 
   final case class RequestLimits(recordLimit: Int, bytesLimit: Int)
 
-  object Retries {
+  private object Retries {
 
     def fullJitter[F[_]: Applicative](config: BackoffPolicy): RetryPolicy[F] =
       capBackoffAndRetries(config, RetryPolicies.fullJitter[F](config.minBackoff))
@@ -266,7 +266,7 @@ object KinesisSink {
   }
 
   private def getRecordSize(record: PutRecordsRequestEntry) =
-    record.data.asByteArray().length + record.partitionKey().getBytes(UTF_8).length
+    record.data.asByteBuffer().limit + record.partitionKey().getBytes(UTF_8).length
 
   private def failureMessageForInternalErrors(
     records: List[PutRecordsRequestEntry],
