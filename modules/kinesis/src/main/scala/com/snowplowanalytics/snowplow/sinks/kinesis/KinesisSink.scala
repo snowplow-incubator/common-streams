@@ -266,7 +266,7 @@ object KinesisSink {
   }
 
   private def getRecordSize(record: PutRecordsRequestEntry) =
-    record.data.asByteBuffer().limit + record.partitionKey().getBytes(UTF_8).length
+    record.data.asByteArrayUnsafe().length + record.partitionKey().getBytes(UTF_8).length
 
   private def failureMessageForInternalErrors(
     records: List[PutRecordsRequestEntry],
