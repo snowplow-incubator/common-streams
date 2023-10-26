@@ -51,6 +51,7 @@ class KinesisSourceSpec
     for {
       refProcessed <- Ref[IO].of[List[ReceivedEvents]](Nil)
       t1 <- IO.realTimeInstant
+      _ <- IO.sleep(5.minutes)
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
       t2 <- IO.realTimeInstant
       processingConfig = new EventProcessingConfig(NoWindowing)
