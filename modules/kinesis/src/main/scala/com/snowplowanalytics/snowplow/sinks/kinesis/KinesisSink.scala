@@ -48,11 +48,9 @@ object KinesisSink {
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
   private def buildKinesisClient(customEndpoint: Option[URI], region: Region): KinesisClient = {
-    val withRegion = KinesisClient.builder().region(region)
-    customEndpoint match {
-      case Some(endpoint) => withRegion.endpointOverride(endpoint).build()
-      case None           => withRegion.build()
-    }
+    val builder = KinesisClient.builder().region(region)
+    customEndpoint.foreach(e => builder.endpointOverride(e))
+    builder.build()
   }
 
   private def mkProducer[F[_]: Sync](config: KinesisSinkConfig): Resource[F, KinesisClient] = {
