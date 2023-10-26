@@ -15,6 +15,7 @@ import fs2.aws.kinesis.{CommittableRecord, Kinesis, KinesisConsumerSettings}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
@@ -36,7 +37,6 @@ import software.amazon.kinesis.retrieval.polling.PollingConfig
 // snowplow
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
-import com.snowplowanalytics.snowplow.kinesis._
 
 object KinesisSource {
 
@@ -112,9 +112,9 @@ object KinesisSource {
   }
 
   private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
+    val region = (new DefaultAwsRegionProviderChain).getRegion
     val resources =
       for {
-        region <- Resource.eval(com.snowplowanalytics.snowplow.kinesis.Util.getRuntimeRegion)
         consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
                               KinesisConsumerSettings(
                                 config.streamName,

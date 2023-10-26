@@ -18,6 +18,7 @@ import retry.{RetryPolicies, RetryPolicy, Sleep}
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.services.kinesis.KinesisClient
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.services.kinesis.model.{PutRecordsRequest, PutRecordsRequestEntry, PutRecordsResponse}
 
 import java.net.URI
@@ -27,7 +28,6 @@ import java.nio.charset.StandardCharsets.UTF_8
 import scala.jdk.CollectionConverters._
 
 import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
-import com.snowplowanalytics.snowplow.kinesis._
 
 object KinesisSink {
 
@@ -56,10 +56,7 @@ object KinesisSink {
   }
 
   private def mkProducer[F[_]: Sync](config: KinesisSinkConfig): Resource[F, KinesisClient] = {
-    val make =
-      for {
-        region <- com.snowplowanalytics.snowplow.kinesis.Util.getRuntimeRegion
-      } yield buildKinesisClient(config.customEndpoint, region)
+    val make = Sync[F].delay(buildKinesisClient(config.customEndpoint, (new DefaultAwsRegionProviderChain).getRegion()))
 
     Resource.make(make) { producer =>
       Sync[F].blocking {

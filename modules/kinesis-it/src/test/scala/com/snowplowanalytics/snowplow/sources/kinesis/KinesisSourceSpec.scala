@@ -17,10 +17,10 @@ import org.specs2.mutable.SpecificationLike
 import org.testcontainers.containers.localstack.LocalStackContainer
 
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
-import com.snowplowanalytics.snowplow.kinesis._
 
 import java.time.Instant
 
@@ -34,12 +34,13 @@ class KinesisSourceSpec
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
+  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] = {
+    val region = (new DefaultAwsRegionProviderChain).getRegion
     for {
-      region <- Resource.eval(com.snowplowanalytics.snowplow.kinesis.Util.getRuntimeRegion[IO])
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
+  }
 
   override def is = s2"""
   KinesisSourceSpec should
