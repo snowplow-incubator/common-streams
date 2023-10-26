@@ -249,7 +249,7 @@ object KinesisSink {
     } yield ()
   }
 
-  final case class RequestLimits(recordLimit: Int, bytesLimit: Int)
+  private final case class RequestLimits(recordLimit: Int, bytesLimit: Int)
 
   private object Retries {
 
