@@ -112,9 +112,9 @@ object KinesisSource {
   }
 
   private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
-    val region = (new DefaultAwsRegionProviderChain).getRegion
     val resources =
       for {
+        region <- Resource.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
         consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
                               KinesisConsumerSettings(
                                 config.streamName,
