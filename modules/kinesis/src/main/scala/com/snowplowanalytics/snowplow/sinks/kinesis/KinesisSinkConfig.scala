@@ -28,7 +28,6 @@ object BackoffPolicy {
 
 case class KinesisSinkConfig(
   streamName: String,
-  partitionKey: Option[String],
   backoffPolicy: BackoffPolicy,
   throttledBackoffPolicy: BackoffPolicy,
   recordLimit: Int,
