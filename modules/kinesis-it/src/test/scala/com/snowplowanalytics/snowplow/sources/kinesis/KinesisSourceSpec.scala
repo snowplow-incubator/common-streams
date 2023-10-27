@@ -34,13 +34,12 @@ class KinesisSourceSpec
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] = {
+  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
-  }
 
   override def is = s2"""
   KinesisSourceSpec should
