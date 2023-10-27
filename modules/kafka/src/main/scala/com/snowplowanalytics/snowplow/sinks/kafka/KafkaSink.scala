@@ -28,7 +28,6 @@ object KafkaSink {
     for {
       producer <- KafkaProducer[F].resource(producerSettings)
     } yield fromFs2Producer(config, producer)
-
   }
 
   private def fromFs2Producer[F[_]: Monad](config: KafkaSinkConfig, producer: KafkaProducer[F, String, Array[Byte]]): Sink[F] =
