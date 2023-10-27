@@ -21,6 +21,7 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
+import com.snowplowanalytics.snowplow.it.kinesis._
 
 import java.time.Instant
 
@@ -37,16 +38,16 @@ class KinesisSourceSpec
   override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
-      localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
+      localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
-    } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
+    } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_))
 
   override def is = s2"""
   KinesisSourceSpec should
     read from input stream $e1
   """
 
-  def e1 = withResource { case (_, kinesisClient, getKinesisConfig) =>
+  def e1 = withResource { case (_, kinesisClient, getKinesisSourceConfig) =>
     val testPayload = "test-payload"
 
     for {
@@ -55,7 +56,7 @@ class KinesisSourceSpec
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
       t2 <- IO.realTimeInstant
       processingConfig = new EventProcessingConfig(NoWindowing)
-      kinesisConfig    = getKinesisConfig(testStream1Name)
+      kinesisConfig    = getKinesisSourceConfig(testStream1Name)
       sourceAndAck <- KinesisSource.build[IO](kinesisConfig)
       stream = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
       fiber <- stream.compile.drain.start
@@ -73,7 +74,7 @@ class KinesisSourceSpec
 }
 
 object KinesisSourceSpec {
-  val testStream1Name = "test-stream-1"
+  val testStream1Name = "test-source-stream-1"
   val KINESIS_INITIALIZE_STREAMS: String =
     List(s"$testStream1Name:1").mkString(",")
 }
