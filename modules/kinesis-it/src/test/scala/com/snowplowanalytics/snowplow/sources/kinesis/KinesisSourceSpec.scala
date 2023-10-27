@@ -35,8 +35,8 @@ class KinesisSourceSpec
 
   /** Resources which are shared across tests */
   override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] = {
-    val region = (new DefaultAwsRegionProviderChain).getRegion
     for {
+      region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
