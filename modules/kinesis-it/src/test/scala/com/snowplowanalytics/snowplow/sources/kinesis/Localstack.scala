@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.sources.kinesis
+package com.snowplowanalytics.snowplow.it.kinesis
 
 import cats.effect.{IO, Resource}
 import org.slf4j.LoggerFactory
@@ -17,19 +17,24 @@ import software.amazon.awssdk.regions.Region
 
 object Localstack {
 
-  def resource(region: Region, kinesisInitializeStreams: String): Resource[IO, LocalStackContainer] =
+  def resource(
+    region: Region,
+    kinesisInitializeStreams: String,
+    loggerName: String
+  ): Resource[IO, LocalStackContainer] =
     Resource.make {
       val localstack = new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.2.0"))
       localstack.addEnv("AWS_DEFAULT_REGION", region.id)
       localstack.addEnv("KINESIS_INITIALIZE_STREAMS", kinesisInitializeStreams)
+      localstack.addEnv("DEBUG", "1")
       localstack.addExposedPort(4566)
       localstack.setWaitStrategy(Wait.forLogMessage(".*Ready.*", 1))
-      IO(startLocalstack(localstack))
+      IO(startLocalstack(localstack, loggerName))
     }(ls => IO.blocking(ls.stop()))
 
-  private def startLocalstack(localstack: LocalStackContainer): LocalStackContainer = {
+  private def startLocalstack(localstack: LocalStackContainer, loggerName: String): LocalStackContainer = {
     localstack.start()
-    val logger = LoggerFactory.getLogger(KinesisSourceSpec.getClass.getSimpleName)
+    val logger = LoggerFactory.getLogger(loggerName)
     val logs   = new Slf4jLogConsumer(logger)
     localstack.followOutput(logs)
     localstack
