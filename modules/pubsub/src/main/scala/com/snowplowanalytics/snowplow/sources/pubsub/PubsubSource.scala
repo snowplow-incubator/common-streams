@@ -21,21 +21,19 @@ import java.nio.ByteBuffer
 import java.time.Instant
 
 // pubsub
-import com.google.api.core.{ApiFutures, ApiService}
+import com.google.api.core.ApiService
 import com.google.api.gax.batching.FlowControlSettings
 import com.google.api.gax.core.ExecutorProvider
-import com.google.cloud.pubsub.v1.{AckReplyConsumerWithResponse, MessageReceiverWithAckResponse, Subscriber}
+import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber}
 import com.google.common.util.concurrent.{ForwardingListeningExecutorService, MoreExecutors}
 import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 // snowplow
-import com.snowplowanalytics.snowplow.pubsub.FutureInterop
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
 
 import scala.concurrent.duration.FiniteDuration
-import scala.jdk.CollectionConverters._
 
 import java.util.concurrent.{Callable, ScheduledExecutorService, ScheduledFuture, ScheduledThreadPoolExecutor, TimeUnit}
 
@@ -46,43 +44,39 @@ object PubsubSource {
   def build[F[_]: Async](config: PubsubSourceConfig): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck(lowLevel(config))
 
-  private type PubSubCheckpointer[F[_]] = Checkpointer[F, List[AckReplyConsumerWithResponse]]
+  private type PubSubCheckpointer[F[_]] = Checkpointer[F, List[AckReplyConsumer]]
 
-  private def lowLevel[F[_]: Async](config: PubsubSourceConfig): LowLevelSource[F, List[AckReplyConsumerWithResponse]] =
-    new LowLevelSource[F, List[AckReplyConsumerWithResponse]] {
+  private def lowLevel[F[_]: Async](config: PubsubSourceConfig): LowLevelSource[F, List[AckReplyConsumer]] =
+    new LowLevelSource[F, List[AckReplyConsumer]] {
       def checkpointer: PubSubCheckpointer[F] = pubsubCheckpointer
 
-      def stream: Stream[F, Stream[F, LowLevelEvents[List[AckReplyConsumerWithResponse]]]] =
+      def stream: Stream[F, Stream[F, LowLevelEvents[List[AckReplyConsumer]]]] =
         Stream.emit(pubsubStream(config))
     }
 
   private def pubsubCheckpointer[F[_]: Async]: PubSubCheckpointer[F] = new PubSubCheckpointer[F] {
-    def combine(x: List[AckReplyConsumerWithResponse], y: List[AckReplyConsumerWithResponse]): List[AckReplyConsumerWithResponse] =
+    def combine(x: List[AckReplyConsumer], y: List[AckReplyConsumer]): List[AckReplyConsumer] =
       x ::: y
 
-    val empty: List[AckReplyConsumerWithResponse] = Nil
-    def ack(c: List[AckReplyConsumerWithResponse]): F[Unit] =
-      c.parTraverse { acker =>
-        Sync[F].delay(acker.ack())
-      }.flatMap { futures =>
-        FutureInterop.fromFuture(ApiFutures.allAsList(futures.asJava)).void
+    val empty: List[AckReplyConsumer] = Nil
+    def ack(c: List[AckReplyConsumer]): F[Unit] =
+      Sync[F].delay {
+        c.foreach(_.ack())
       }
 
-    def nack(c: List[AckReplyConsumerWithResponse]): F[Unit] =
-      c.parTraverse { acker =>
-        Sync[F].delay(acker.nack())
-      }.flatMap { futures =>
-        FutureInterop.fromFuture(ApiFutures.allAsList(futures.asJava)).void
+    def nack(c: List[AckReplyConsumer]): F[Unit] =
+      Sync[F].delay {
+        c.foreach(_.nack())
       }
   }
 
   private case class SingleMessage[F[_]](
     message: ByteBuffer,
-    ackReply: AckReplyConsumerWithResponse,
+    ackReply: AckReplyConsumer,
     tstamp: Instant
   )
 
-  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[List[AckReplyConsumerWithResponse]]] = {
+  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[List[AckReplyConsumer]]] = {
     val resources = for {
       dispatcher <- Stream.resource(Dispatcher.sequential(await = false))
       queue <- Stream.eval(Queue.unbounded[F, SingleMessage[F]])
@@ -166,8 +160,11 @@ object PubsubSource {
            })
       _ <- Stream.bracket(Sync[F].delay(subscriber.startAsync())) { apiService =>
              for {
+               _ <- Logger[F].info("Stopping the PubSub Subscriber...")
                _ <- Sync[F].delay(apiService.stopAsync())
                _ <- drainQueue(queue)
+               _ <- Logger[F].info("Waiing for the PubSub Subscriber to finish cleanly...")
+               _ <- Sync[F].blocking(apiService.awaitTerminated())
              } yield ()
            }
     } yield ()
@@ -175,7 +172,7 @@ object PubsubSource {
 
   private def drainQueue[F[_]: Async](queue: QueueSource[F, SingleMessage[F]]): F[Unit] = {
 
-    def go(acc: List[AckReplyConsumerWithResponse], queue: QueueSource[F, SingleMessage[F]]): F[List[AckReplyConsumerWithResponse]] =
+    def go(acc: List[AckReplyConsumer], queue: QueueSource[F, SingleMessage[F]]): F[List[AckReplyConsumer]] =
       queue.tryTake.flatMap {
         case Some(SingleMessage(_, acker, _)) =>
           go(acker :: acc, queue)
@@ -194,9 +191,9 @@ object PubsubSource {
     dispatcher: Dispatcher[F],
     semaphore: Semaphore[F],
     sig: DeferredSource[F, Either[Throwable, Unit]]
-  ): MessageReceiverWithAckResponse =
-    new MessageReceiverWithAckResponse {
-      def receiveMessage(message: PubsubMessage, ackReply: AckReplyConsumerWithResponse): Unit = {
+  ): MessageReceiver =
+    new MessageReceiver {
+      def receiveMessage(message: PubsubMessage, ackReply: AckReplyConsumer): Unit = {
         val tstamp = Instant.ofEpochSecond(message.getPublishTime.getSeconds, message.getPublishTime.getNanos.toLong)
         val put = semaphore.acquireN(permitsFor(config, message.getData.size)) *>
           queue.offer(SingleMessage(message.getData.asReadOnlyByteBuffer(), ackReply, tstamp))
@@ -205,7 +202,7 @@ object PubsubSource {
           .race(sig.get)
           .flatMap {
             case Right(_) =>
-              FutureInterop.fromFuture(ackReply.nack())
+              Sync[F].delay(ackReply.nack())
             case Left(_) =>
               Sync[F].unit
           }

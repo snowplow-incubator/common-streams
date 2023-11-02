@@ -75,33 +75,35 @@ private[sources] object LowLevelSource {
    */
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
     for {
-      acksRef <- Ref[F].of(Map.empty[Unique.Token, C])
       latencyRef <- Ref[F].of(Option.empty[FiniteDuration])
-    } yield sourceAndAckImpl(source, acksRef, latencyRef)
+    } yield sourceAndAckImpl(source, latencyRef)
 
   private def sourceAndAckImpl[F[_]: Async, C](
     source: LowLevelSource[F, C],
-    acksRef: Ref[F, State[C]],
     latencyRef: LatencyRef[F]
   ): SourceAndAck[F] = new SourceAndAck[F] {
-    def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] =
-      source.stream
-        .flatMap { s2 =>
-          val tokenedSources = s2
-            .through(monitorLatency(latencyRef))
-            .through(tokened(acksRef))
-            .through(windowed(config.windowing))
+    def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] = {
+      val str = for {
+        acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
+        s2 <- source.stream
+      } yield {
+        val tokenedSources = s2
+          .through(monitorLatency(latencyRef))
+          .through(tokened(acksRef))
+          .through(windowed(config.windowing))
 
-          val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
-            CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control))
-          }
-
-          tokenedSources
-            .zip(sinks)
-            .map { case (tokenedSource, sink) => sink(tokenedSource) }
-            .parJoin(2) // so we start processing the next window while the previous window is still finishing up.
+        val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
+          CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control))
         }
-        .onFinalize(nackUnhandled(source.checkpointer, acksRef))
+
+        tokenedSources
+          .zip(sinks)
+          .map { case (tokenedSource, sink) => sink(tokenedSource) }
+          .parJoin(2) // so we start processing the next window while the previous window is still finishing up.
+      }
+
+      str.flatten
+    }
 
     def processingLatency: F[FiniteDuration] =
       latencyRef.get.flatMap {
