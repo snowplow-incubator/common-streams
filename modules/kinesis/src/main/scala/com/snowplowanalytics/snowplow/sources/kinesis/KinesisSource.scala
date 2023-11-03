@@ -14,6 +14,7 @@ import fs2.Stream
 import fs2.aws.kinesis.{CommittableRecord, Kinesis, KinesisConsumerSettings}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
@@ -208,6 +209,7 @@ object KinesisSource {
           KinesisAsyncClient
             .builder()
             .region(region)
+            .defaultsMode(DefaultsMode.AUTO)
         val customized = customEndpoint.map(builder.endpointOverride).getOrElse(builder)
         customized.build
       }
@@ -220,6 +222,7 @@ object KinesisSource {
           DynamoDbAsyncClient
             .builder()
             .region(region)
+            .defaultsMode(DefaultsMode.AUTO)
         val customized = customEndpoint.map(builder.endpointOverride).getOrElse(builder)
         customized.build
       }
@@ -232,6 +235,7 @@ object KinesisSource {
           CloudWatchAsyncClient
             .builder()
             .region(region)
+            .defaultsMode(DefaultsMode.AUTO)
         val customized = customEndpoint.map(builder.endpointOverride).getOrElse(builder)
         customized.build
       }
