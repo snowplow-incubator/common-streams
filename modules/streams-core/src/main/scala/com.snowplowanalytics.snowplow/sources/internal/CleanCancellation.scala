@@ -70,7 +70,7 @@ object CleanCancellation {
       .concurrently {
         Stream.bracket(().pure[F])(_ => sig.complete(()).void) >>
           Stream
-            .fromQueueNoneTerminated(queue)
+            .fromQueueNoneTerminated(queue, 1)
             .through(sinkAndCheckpoint)
             .onFinalizeCase {
               case ExitCase.Succeeded =>
