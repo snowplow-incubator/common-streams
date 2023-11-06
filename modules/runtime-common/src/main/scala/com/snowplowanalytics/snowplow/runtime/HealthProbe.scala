@@ -11,6 +11,7 @@ import cats.effect.{Async, Resource, Sync}
 import cats.data.Kleisli
 import cats.implicits._
 import com.comcast.ip4s.{Ipv4Address, Port}
+import io.circe.Decoder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.{HttpApp, Response, Status}
 import org.typelevel.log4cats.Logger
@@ -36,6 +37,12 @@ object HealthProbe {
         Logger[F].info(s"Health service listening on port $port")
       }
       .void
+
+  object decoders {
+    def portDecoder: Decoder[Port] = Decoder.decodeInt.emap { port =>
+      Port.fromInt(port).toRight("Invalid port")
+    }
+  }
 
   private def httpApp[F[_]: Sync](isHealthy: F[Status]): HttpApp[F] =
     Kleisli { _ =>

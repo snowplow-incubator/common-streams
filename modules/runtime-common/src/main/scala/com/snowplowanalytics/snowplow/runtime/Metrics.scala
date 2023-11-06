@@ -11,6 +11,9 @@ import cats.effect.{Async, Sync}
 import cats.effect.kernel.{Ref, Resource}
 import cats.implicits._
 import fs2.Stream
+import io.circe.Decoder
+import io.circe.config.syntax._
+import io.circe.generic.semiauto._
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
@@ -43,6 +46,8 @@ abstract class Metrics[F[_]: Async, S <: Metrics.State](
 
 object Metrics {
 
+  /** Public API */
+
   case class StatsdConfig(
     hostname: String,
     port: Int,
@@ -50,6 +55,11 @@ object Metrics {
     period: FiniteDuration,
     prefix: String
   )
+
+  object StatsdConfig {
+    implicit def stasdConfigDecoder: Decoder[Option[StatsdConfig]] =
+      deriveDecoder[StatsdUnresolvedConfig].map(resolveConfig(_))
+  }
 
   trait State {
     def toKVMetrics: List[KVMetric]
@@ -69,6 +79,30 @@ object Metrics {
     def value: String
     def metricType: MetricType
   }
+
+  /** Private implementation */
+
+  /**
+   * The raw config received by combinging user-provided config with snowplow defaults
+   *
+   * If user did not configure statsd, then hostname is None and all other params are defined via
+   * our defaults.
+   */
+  private case class StatsdUnresolvedConfig(
+    hostname: Option[String],
+    port: Int,
+    tags: Map[String, String],
+    period: FiniteDuration,
+    prefix: String
+  )
+
+  private def resolveConfig(from: StatsdUnresolvedConfig): Option[StatsdConfig] =
+    from match {
+      case StatsdUnresolvedConfig(Some(hostname), port, tags, period, prefix) =>
+        Some(StatsdConfig(hostname, port, tags, period, prefix))
+      case StatsdUnresolvedConfig(None, _, _, _, _) =>
+        None
+    }
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 

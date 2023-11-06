@@ -157,13 +157,16 @@ object Dependencies {
     cats,
     catsEffectKernel,
     circeConfig,
+    circeGeneric,
     emberServer,
     fs2,
     igluClient,
     log4cats,
     slf4jApi,
     tracker,
-    trackerEmit
+    trackerEmit,
+    specs2,
+    circeLiteral % Test
   )
 
   val loadersCommonDependencies = Seq(
