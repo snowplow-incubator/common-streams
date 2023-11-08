@@ -39,7 +39,7 @@ object HealthProbe {
       .void
 
   object decoders {
-    def portDecoder: Decoder[Port] = Decoder.decodeInt.emap { port =>
+    implicit def portDecoder: Decoder[Port] = Decoder.decodeInt.emap { port =>
       Port.fromInt(port).toRight("Invalid port")
     }
   }
