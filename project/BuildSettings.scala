@@ -85,7 +85,7 @@ object BuildSettings {
     ThisBuild / mimaFailOnNoPrevious := false,
     mimaBinaryIssueFilters ++= Seq(),
     Test / test := {
-      mimaReportBinaryIssues.value
+      val _ = mimaReportBinaryIssues.value
       (Test / test).value
     }
   )
