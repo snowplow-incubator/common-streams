@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.sources
 
 import cats.effect.kernel.Unique
+import fs2.Chunk
 
 import java.nio.ByteBuffer
 import java.time.Instant
@@ -16,7 +17,7 @@ import java.time.Instant
  * The events as they are fed into a [[EventProcessor]]
  *
  * @param events
- *   Each item in the List an event read from the external stream, before parsing
+ *   Each item in the Chunk is an event read from the external stream, before parsing
  * @param ack
  *   The [[EventProcessor]] must emit this token after it has fully processed the batch of events.
  *   When the [[EventProcessor]] emits the token, it is an instruction to the [[SourceAndAck]] to
@@ -26,7 +27,7 @@ import java.time.Instant
  *   the latency metric.
  */
 case class TokenedEvents(
-  events: List[ByteBuffer],
+  events: Chunk[ByteBuffer],
   ack: Unique.Token,
   earliestSourceTstamp: Option[Instant]
 )

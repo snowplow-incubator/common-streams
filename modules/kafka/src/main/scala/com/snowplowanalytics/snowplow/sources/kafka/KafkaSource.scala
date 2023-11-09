@@ -78,9 +78,9 @@ object KafkaSource {
         .flatMap { chunk =>
           chunk.last match {
             case Some(last) =>
-              val events = chunk.iterator.map {
+              val events = chunk.map {
                 _.record.value
-              }.toList
+              }
               val ack = KafkaCheckpoints(Map(topicPartition.partition -> OffsetAndCommit(last.record.offset, last.offset.commit)))
               val timestamps = chunk.iterator.flatMap { ccr =>
                 val ts = ccr.record.timestamp

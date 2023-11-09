@@ -57,7 +57,7 @@ object Utils {
     _.evalMap { case TokenedEvents(events, token, tstamp) =>
       val parsed = events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString)
       for {
-        _ <- ref.update(_ :+ ReceivedEvents(parsed, tstamp))
+        _ <- ref.update(_ :+ ReceivedEvents(parsed.toList, tstamp))
       } yield token
     }
 

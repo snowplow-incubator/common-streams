@@ -7,6 +7,8 @@
  */
 package com.snowplowanalytics.snowplow.sources.internal
 
+import fs2.Chunk
+
 import java.nio.ByteBuffer
 import java.time.Instant
 
@@ -17,7 +19,7 @@ import java.time.Instant
  * processor
  */
 case class LowLevelEvents[C](
-  events: List[ByteBuffer],
+  events: Chunk[ByteBuffer],
   ack: C,
   earliestSourceTstamp: Option[Instant]
 )

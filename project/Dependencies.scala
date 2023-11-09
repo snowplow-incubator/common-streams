@@ -12,8 +12,8 @@ object Dependencies {
   object V {
     // Scala
     val cats             = "2.9.0"
-    val catsEffect       = "3.5.0"
-    val fs2              = "3.7.0"
+    val catsEffect       = "3.5.2"
+    val fs2              = "3.9.3"
     val log4cats         = "2.6.0"
     val http4s           = "0.23.15"
     val decline          = "2.4.1"

@@ -13,7 +13,7 @@ import cats.effect.implicits._
 import cats.effect.kernel.{Deferred, DeferredSink, DeferredSource}
 import cats.effect.std._
 import cats.implicits._
-import fs2.Stream
+import fs2.{Chunk, Stream}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
@@ -44,27 +44,27 @@ object PubsubSource {
   def build[F[_]: Async](config: PubsubSourceConfig): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck(lowLevel(config))
 
-  private type PubSubCheckpointer[F[_]] = Checkpointer[F, List[AckReplyConsumer]]
+  private type PubSubCheckpointer[F[_]] = Checkpointer[F, Chunk[AckReplyConsumer]]
 
-  private def lowLevel[F[_]: Async](config: PubsubSourceConfig): LowLevelSource[F, List[AckReplyConsumer]] =
-    new LowLevelSource[F, List[AckReplyConsumer]] {
+  private def lowLevel[F[_]: Async](config: PubsubSourceConfig): LowLevelSource[F, Chunk[AckReplyConsumer]] =
+    new LowLevelSource[F, Chunk[AckReplyConsumer]] {
       def checkpointer: PubSubCheckpointer[F] = pubsubCheckpointer
 
-      def stream: Stream[F, Stream[F, LowLevelEvents[List[AckReplyConsumer]]]] =
+      def stream: Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
         Stream.emit(pubsubStream(config))
     }
 
   private def pubsubCheckpointer[F[_]: Async]: PubSubCheckpointer[F] = new PubSubCheckpointer[F] {
-    def combine(x: List[AckReplyConsumer], y: List[AckReplyConsumer]): List[AckReplyConsumer] =
-      x ::: y
+    def combine(x: Chunk[AckReplyConsumer], y: Chunk[AckReplyConsumer]): Chunk[AckReplyConsumer] =
+      Chunk.Queue(x, y)
 
-    val empty: List[AckReplyConsumer] = Nil
-    def ack(c: List[AckReplyConsumer]): F[Unit] =
+    val empty: Chunk[AckReplyConsumer] = Chunk.empty
+    def ack(c: Chunk[AckReplyConsumer]): F[Unit] =
       Sync[F].delay {
         c.foreach(_.ack())
       }
 
-    def nack(c: List[AckReplyConsumer]): F[Unit] =
+    def nack(c: Chunk[AckReplyConsumer]): F[Unit] =
       Sync[F].delay {
         c.foreach(_.nack())
       }
@@ -76,7 +76,7 @@ object PubsubSource {
     tstamp: Instant
   )
 
-  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[List[AckReplyConsumer]]] = {
+  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]] = {
     val resources = for {
       dispatcher <- Stream.resource(Dispatcher.sequential(await = false))
       queue <- Stream.eval(Queue.unbounded[F, SingleMessage[F]])
@@ -92,13 +92,15 @@ object PubsubSource {
         .chunks
         .filter(_.nonEmpty)
         .map { chunk =>
-          val events         = chunk.map(_.message).toList
-          val acks           = chunk.map(_.ackReply).toList
+          val events         = chunk.map(_.message)
+          val acks           = chunk.map(_.ackReply)
           val earliestTstamp = chunk.map(_.tstamp).iterator.min
           LowLevelEvents(events, acks, Some(earliestTstamp))
         }
         .evalTap { case LowLevelEvents(events, _, _) =>
-          val numPermits = events.map(e => permitsFor(config, e.limit())).sum
+          val numPermits = events.foldLeft(0L) { case (numPermits, e) =>
+            numPermits + permitsFor(config, e.limit())
+          }
           semaphore.releaseN(numPermits)
         }
         .interruptWhen(sig)
@@ -181,7 +183,7 @@ object PubsubSource {
       }
 
     go(Nil, queue).flatMap { ackers =>
-      pubsubCheckpointer.nack(ackers)
+      pubsubCheckpointer.nack(Chunk.from(ackers))
     }
   }
 

@@ -11,7 +11,7 @@ import cats.effect.IO
 import cats.effect.kernel.{Ref, Unique}
 import cats.effect.testkit.TestControl
 import cats.effect.testing.specs2.CatsEffect
-import fs2.Stream
+import fs2.{Chunk, Stream}
 import org.specs2.Specification
 import org.specs2.matcher.Matcher
 
@@ -117,7 +117,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
             IO.raiseError(new RuntimeException(s"boom! Exceeded $errorAfterBatch batches"))
           else
             ref
-              .update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
+              .update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
               .as(token)
         }
 
@@ -250,7 +250,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val lowLevelSource = new LowLevelSource[IO, Unit] {
       def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Nil, (), None)).repeat
+        Stream.emit(LowLevelEvents(Chunk.empty, (), None)).repeat
       }
     }
 
@@ -279,7 +279,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val lowLevelSource = new LowLevelSource[IO, Unit] {
       def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Nil, (), None)).repeat
+        Stream.emit(LowLevelEvents(Chunk.empty, (), None)).repeat
       }
     }
 
@@ -306,7 +306,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val lowLevelSource = new LowLevelSource[IO, Unit] {
       def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Nil, (), None)) ++ Stream.never[IO]
+        Stream.emit(LowLevelEvents(Chunk.empty, (), None)) ++ Stream.never[IO]
       }
     }
 
@@ -353,7 +353,7 @@ object LowLevelSourceSpec {
     _.evalMap { case TokenedEvents(events, token, _) =>
       for {
         _ <- IO.sleep(TimeToProcessBatch)
-        _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
+        _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
       } yield token
     }
 
@@ -368,7 +368,7 @@ object LowLevelSourceSpec {
       val out = in.evalMap { case TokenedEvents(events, token, _) =>
         for {
           _ <- IO.sleep(TimeToProcessBatch)
-          _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString))
+          _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
           _ <- checkpoints.update(token :: _)
         } yield ()
       }
@@ -394,9 +394,11 @@ object LowLevelSourceSpec {
           Stream.range(1, BatchesPerRebalance + 1).flatMap { batchId =>
             val events = (1 to EventsPerBatch)
               .map(eventId => s"rebalance $rebalanceId - batch $batchId - event $eventId")
-              .toList
-            val asBytes = events.map(_.getBytes(StandardCharsets.UTF_8)).map(ByteBuffer.wrap)
-            Stream.emit(LowLevelEvents(events = asBytes, ack = events, earliestSourceTstamp = None)) ++ Stream
+            val asBytes = Chunk
+              .from(events)
+              .map(_.getBytes(StandardCharsets.UTF_8))
+              .map(ByteBuffer.wrap)
+            Stream.emit(LowLevelEvents(events = asBytes, ack = events.toList, earliestSourceTstamp = None)) ++ Stream
               .sleep[IO](TimeBetweenBatches)
               .drain
           }

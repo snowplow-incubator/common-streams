@@ -33,7 +33,7 @@ object KafkaSink {
 
   private def fromFs2Producer[F[_]: Monad](config: KafkaSinkConfig, producer: KafkaProducer[F, String, Array[Byte]]): Sink[F] =
     Sink { batch =>
-      val records = Chunk.seq(batch.map(toProducerRecord(config, _)))
+      val records = Chunk.from(batch.map(toProducerRecord(config, _)))
       producer.produce(records).flatten.void
     }
 
