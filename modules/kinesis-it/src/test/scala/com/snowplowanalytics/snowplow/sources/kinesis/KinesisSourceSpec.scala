@@ -17,6 +17,7 @@ import org.specs2.mutable.SpecificationLike
 import org.testcontainers.containers.localstack.LocalStackContainer
 
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
@@ -35,7 +36,7 @@ class KinesisSourceSpec
   /** Resources which are shared across tests */
   override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
     for {
-      region <- Resource.eval(KinesisSourceConfig.getRuntimeRegion[IO])
+      region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (localstack, kinesisClient, getKinesisConfig(localstack.getEndpoint)(_))
