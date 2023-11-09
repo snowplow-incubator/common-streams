@@ -14,6 +14,7 @@ object Dependencies {
     val cats             = "2.9.0"
     val catsEffect       = "3.5.2"
     val fs2              = "3.9.3"
+    val catsRetry        = "3.1.0"
     val log4cats         = "2.6.0"
     val http4s           = "0.23.15"
     val decline          = "2.4.1"
@@ -55,6 +56,7 @@ object Dependencies {
   val cats              = "org.typelevel"          %% "cats-core"               % V.cats
   val fs2               = "co.fs2"                 %% "fs2-core"                % V.fs2
   val log4cats          = "org.typelevel"          %% "log4cats-slf4j"          % V.log4cats
+  val catsRetry         = "com.github.cb372"       %% "cats-retry"              % V.catsRetry
   val emberServer       = "org.http4s"             %% "http4s-ember-server"     % V.http4s
   val decline           = "com.monovore"           %% "decline-effect"          % V.decline
   val circeConfig       = "io.circe"               %% "circe-config"            % V.circeConfig
@@ -110,6 +112,7 @@ object Dependencies {
     catsEffectKernel,
     fs2,
     log4cats,
+    catsRetry,
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,
