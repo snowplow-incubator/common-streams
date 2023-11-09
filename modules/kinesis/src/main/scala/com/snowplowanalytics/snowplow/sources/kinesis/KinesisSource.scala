@@ -16,6 +16,7 @@ import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
@@ -114,7 +115,7 @@ object KinesisSource {
   private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
     val resources =
       for {
-        region <- Resource.eval(KinesisSourceConfig.getRuntimeRegion)
+        region <- Resource.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
         consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
                               KinesisConsumerSettings(
                                 config.streamName,
