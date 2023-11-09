@@ -181,7 +181,7 @@ object PubsubSource {
       }
 
     go(Nil, queue).flatMap { ackers =>
-      pubsubCheckpointer.ack(ackers)
+      pubsubCheckpointer.nack(ackers)
     }
   }
 
