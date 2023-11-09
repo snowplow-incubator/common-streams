@@ -10,6 +10,7 @@ package com.snowplowanalytics.snowplow.sources.kafka
 import cats.Applicative
 import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
+import cats.effect.implicits._
 import cats.kernel.Semigroup
 import fs2.Stream
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
@@ -49,12 +50,12 @@ object KafkaSource {
       if (x.offset > y.offset) x else y
   }
 
-  private def kafkaCheckpointer[F[_]: Applicative]: Checkpointer[F, KafkaCheckpoints[F]] = new Checkpointer[F, KafkaCheckpoints[F]] {
+  private def kafkaCheckpointer[F[_]: Async]: Checkpointer[F, KafkaCheckpoints[F]] = new Checkpointer[F, KafkaCheckpoints[F]] {
     def combine(x: KafkaCheckpoints[F], y: KafkaCheckpoints[F]): KafkaCheckpoints[F] =
       KafkaCheckpoints(x.byPartition |+| y.byPartition)
 
     val empty: KafkaCheckpoints[F] = KafkaCheckpoints(Map.empty)
-    def ack(c: KafkaCheckpoints[F]): F[Unit]  = c.byPartition.values.toList.traverse_(_.commit)
+    def ack(c: KafkaCheckpoints[F]): F[Unit]  = c.byPartition.values.toList.parTraverse(_.commit).void
     def nack(c: KafkaCheckpoints[F]): F[Unit] = Applicative[F].unit
   }
 

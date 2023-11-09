@@ -8,10 +8,10 @@
 package com.snowplowanalytics.snowplow.sinks.pubsub
 
 import cats.effect.{Async, Sync}
-import cats.effect.implicits._
 import cats.effect.kernel.Resource
 import cats.implicits._
-import com.google.api.core.ApiFutures
+import cats.Foldable
+import com.google.api.core.{ApiFuture, ApiFutures}
 import com.google.api.gax.batching.BatchingSettings
 import com.google.cloud.pubsub.v1.Publisher
 import com.google.protobuf.ByteString
@@ -32,8 +32,8 @@ object PubsubSink {
     }
 
   private def sinkBatch[F[_]: Async](publisher: Publisher, batch: List[Sinkable]): F[Unit] =
-    batch
-      .parTraverse { case Sinkable(bytes, _, attributes) =>
+    Foldable[List]
+      .foldM(batch, List.empty[ApiFuture[String]]) { case (futures, Sinkable(bytes, _, attributes)) =>
         for {
           uuid <- Async[F].delay(UUID.randomUUID)
           message = PubsubMessage.newBuilder
@@ -42,7 +42,7 @@ object PubsubSink {
                       .putAllAttributes(attributes.asJava)
                       .build
           fut <- Async[F].delay(publisher.publish(message))
-        } yield fut
+        } yield fut :: futures
       }
       .flatMap { futures =>
         for {
