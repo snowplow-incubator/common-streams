@@ -17,12 +17,12 @@ import eu.timepit.refined.types.numeric.PosInt
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
-import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, PutRecordRequest, PutRecordResponse}
+import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, PutRecordRequest, PutRecordResponse, GetShardIteratorRequest}
 
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
 import com.snowplowanalytics.snowplow.sinks.kinesis.{BackoffPolicy, KinesisSinkConfig}
-import software.amazon.awssdk.services.kinesis.model.GetShardIteratorRequest
+
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
