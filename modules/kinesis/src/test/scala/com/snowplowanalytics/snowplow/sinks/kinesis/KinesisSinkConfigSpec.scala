@@ -18,6 +18,7 @@ class KinesisSinkConfigSpec extends Specification {
   def is = s2"""
   The KinesisSource decoder should:
     Decode a valid JSON config $e1
+    Fail to decode an invalid JSON config $e2
   """
 
   def e1 = {
@@ -46,5 +47,24 @@ class KinesisSinkConfigSpec extends Specification {
         c.customEndpoint must beEqualTo(Some(URI.create("http://localhost:4040")))
       ).reduce(_ and _)
     }
+  }
+
+    def e2 = {
+    val json = json"""
+    {
+      "throttledBackoffPolicy": {
+        "minBackoff": "100ms",
+        "maxBackoff": "500ms",
+        "maxRetries": 3
+      },
+      "recordLimit": 1000,
+      "byteLimit": 1000,
+      "customEndpoint": "http://localhost:4040"
+    }
+    """
+
+    json.as[KinesisSinkConfig] must beLeft
+
+    
   }
 }
