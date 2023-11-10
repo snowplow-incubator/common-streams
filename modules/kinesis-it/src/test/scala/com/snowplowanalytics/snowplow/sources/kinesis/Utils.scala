@@ -30,6 +30,8 @@ import java.util.UUID
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamRequest
+
 object Utils {
 
   case class ReceivedEvents(events: List[String], tstamp: Option[Instant])
@@ -59,22 +61,23 @@ object Utils {
    */
   def getDataFromKinesis(
     client: KinesisAsyncClient,
-    region: String,
     streamName: String
   ): ReceivedEvents = {
 
+    val descStreamResp = client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get
+
     val shIterRequest = GetShardIteratorRequest
       .builder()
-      .streamName("test-sink-stream-1")
+      .streamName(streamName)
       .shardIteratorType("TRIM_HORIZON")
-      .shardId("shardId-000000000000")
+      .shardId(descStreamResp.streamDescription.shards.get(0).shardId)
       .build();
 
     val shIter = client.getShardIterator(shIterRequest).get.shardIterator
 
     val request = GetRecordsRequest
       .builder()
-      .streamARN(s"arn:aws:kinesis:$region:000000000000:stream/$streamName")
+      .streamARN(descStreamResp.streamDescription().streamARN())
       .shardIterator(shIter)
       .build()
 

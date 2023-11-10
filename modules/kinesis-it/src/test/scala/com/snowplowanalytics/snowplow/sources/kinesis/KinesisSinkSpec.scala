@@ -50,7 +50,7 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
       kinesisClient <- getKinesisClient(localstack.getEndpoint, region)
       _ <- testSink.sink(testInput)
       _ <- IO.sleep(3.seconds)
-      result = getDataFromKinesis(kinesisClient, region.toString, testStream1Name)
+      result = getDataFromKinesis(kinesisClient, testStream1Name)
     } yield List(
       result.events must haveSize(1),
       result.events must beEqualTo(List(testPayload))
