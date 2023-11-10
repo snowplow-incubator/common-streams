@@ -35,7 +35,7 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSinkSpec.getClass.getSimpleName)
       testSink <- KinesisSink.resource[IO](getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
-    } yield (region, localstack,  testSink)
+    } yield (region, localstack, testSink)
 
   override def is = s2"""
   KinesisSinkSpec should

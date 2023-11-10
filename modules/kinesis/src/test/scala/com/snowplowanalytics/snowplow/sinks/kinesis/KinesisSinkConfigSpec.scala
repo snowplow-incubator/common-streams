@@ -49,7 +49,7 @@ class KinesisSinkConfigSpec extends Specification {
     }
   }
 
-    def e2 = {
+  def e2 = {
     val json = json"""
     {
       "throttledBackoffPolicy": {
@@ -65,6 +65,5 @@ class KinesisSinkConfigSpec extends Specification {
 
     json.as[KinesisSinkConfig] must beLeft
 
-    
   }
 }
