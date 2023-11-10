@@ -17,7 +17,13 @@ import eu.timepit.refined.types.numeric.PosInt
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
-import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, PutRecordRequest, PutRecordResponse, GetShardIteratorRequest, CreateStreamRequest}
+import software.amazon.awssdk.services.kinesis.model.{
+  CreateStreamRequest,
+  GetRecordsRequest,
+  GetShardIteratorRequest,
+  PutRecordRequest,
+  PutRecordResponse
+}
 
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
@@ -37,19 +43,29 @@ object Utils {
 
   def createAndWaitForKinesisStream(
     client: KinesisAsyncClient,
-    streamName: String, 
-    shardCount: Int) = {
+    streamName: String,
+    shardCount: Int
+  ) = {
     val createStreamReq = CreateStreamRequest
-      .builder().streamName(streamName)
+      .builder()
+      .streamName(streamName)
       .shardCount(shardCount)
       .build()
 
     val resp = client.createStream(createStreamReq).get
 
     // Block till it's active
-    while (resp.sdkHttpResponse().isSuccessful() && (client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get.streamDescription.streamStatusAsString !=  "ACTIVE")) {
+    while (
+      resp.sdkHttpResponse().isSuccessful() && (client
+        .describeStream(DescribeStreamRequest.builder().streamName(streamName).build())
+        .get
+        .streamDescription
+        .streamStatusAsString != "ACTIVE")
+    ) {
       Thread.sleep(500)
-      println(client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get.streamDescription.streamStatusAsString)
+      println(
+        client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get.streamDescription.streamStatusAsString
+      )
     }
   }
 
@@ -101,12 +117,13 @@ object Utils {
       .build()
 
     val out =
-      client.getRecords(request)
-      .get()
-      .records()
-      .asScala
-      .toList
-      .map(record => new String(record.data.asByteArray()))
+      client
+        .getRecords(request)
+        .get()
+        .records()
+        .asScala
+        .toList
+        .map(record => new String(record.data.asByteArray()))
 
     ReceivedEvents(out, None)
   }
@@ -139,10 +156,10 @@ object Utils {
     }
 
   def getKinesisClient(endpoint: URI, region: Region): KinesisAsyncClient =
-      KinesisAsyncClient
-        .builder()
-        .endpointOverride(endpoint)
-        .region(region)
-        .build()
+    KinesisAsyncClient
+      .builder()
+      .endpointOverride(endpoint)
+      .region(region)
+      .build()
 
 }

@@ -27,9 +27,7 @@ import java.time.Instant
 import Utils._
 import software.amazon.awssdk.regions.Region
 
-class KinesisSourceSpec
-    extends CatsResource[IO, (Region, LocalStackContainer, String => KinesisSourceConfig)]
-    with SpecificationLike {
+class KinesisSourceSpec extends CatsResource[IO, (Region, LocalStackContainer, String => KinesisSourceConfig)] with SpecificationLike {
 
   override val Timeout: FiniteDuration = 3.minutes
 
@@ -47,7 +45,7 @@ class KinesisSourceSpec
   """
 
   def e1 = withResource { case (region, localstack, getKinesisSourceConfig) =>
-    val testPayload = "test-payload"
+    val testPayload     = "test-payload"
     val testStream1Name = "test-source-stream-1"
 
     val kinesisClient = getKinesisClient(localstack.getEndpoint, region)
@@ -77,5 +75,4 @@ class KinesisSourceSpec
   }
 }
 
-object KinesisSourceSpec {
-}
+object KinesisSourceSpec {}
