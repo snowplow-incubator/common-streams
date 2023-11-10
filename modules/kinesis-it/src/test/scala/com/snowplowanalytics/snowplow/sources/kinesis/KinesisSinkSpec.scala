@@ -29,11 +29,11 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Str
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (Region, LocalStackContainer, String => KinesisSinkConfig )] =
+  override val resource: Resource[IO, (Region, LocalStackContainer, String => KinesisSinkConfig)] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
-      localstack <- Localstack.resource(region,  KinesisSinkSpec.getClass.getSimpleName) 
-    } yield (region, localstack,  getKinesisSinkConfig(localstack.getEndpoint)(_))
+      localstack <- Localstack.resource(region, KinesisSinkSpec.getClass.getSimpleName)
+    } yield (region, localstack, getKinesisSinkConfig(localstack.getEndpoint)(_))
 
   override def is = s2"""
   KinesisSinkSpec should
@@ -42,14 +42,14 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Str
 
   def e1 = withResource { case (region, localstack, getKinesisSinkConfig) =>
     val testStream1Name = "test-sink-stream-1"
-    val testPayload = "test-payload"
-    val testInput   = List(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
+    val testPayload     = "test-payload"
+    val testInput       = List(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
 
     val kinesisClient = getKinesisClient(localstack.getEndpoint, region)
     createAndWaitForKinesisStream(kinesisClient, testStream1Name, 1): Unit
     val testSinkResource = KinesisSink.resource[IO](getKinesisSinkConfig(testStream1Name))
 
-    for { 
+    for {
       _ <- testSinkResource.use(testSink => testSink.sink(testInput))
       _ <- IO.sleep(3.seconds)
       result = getDataFromKinesis(kinesisClient, testStream1Name)
@@ -60,5 +60,4 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Str
   }
 }
 
-object KinesisSinkSpec {
-}
+object KinesisSinkSpec {}
