@@ -66,6 +66,8 @@ object Utils {
 
     val descStreamResp = client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get
 
+    // We're assuming only one shard here.
+    // Any future test with multiple shards requires us to create one iterator per shard
     val shIterRequest = GetShardIteratorRequest
       .builder()
       .streamName(streamName)
