@@ -154,10 +154,11 @@ object KinesisSink {
     /**
      * The build method creates a TryBatchResult, which:
      *
-     * Returns an empty list and false for hadNonThrottleErrors if everything was successful Returns
-     * the list of failed requests and true for hadNonThrottleErrors if we encountered any errors
-     * that weren't throttles Returns the list of failed requests and false for hadNonThrottleErrors
-     * if we encountered only throttling
+     *   - Returns an empty list and false for hadNonThrottleErrors if everything was successful
+     *   - Returns the list of failed requests and true for hadNonThrottleErrors if we encountered
+     *     any errors that weren't throttles
+     *   - Returns the list of failed requests and false for hadNonThrottleErrors if we encountered
+     *     only throttling
      */
     def build(records: List[PutRecordsRequestEntry], prr: PutRecordsResponse): TryBatchResult =
       if (prr.failedRecordCount().toInt =!= 0)
@@ -190,7 +191,7 @@ object KinesisSink {
   private def tryWriteToKinesis[F[_]: Sync](
     streamName: String,
     kinesis: KinesisClient,
-    records: List[PutRecordsRequestEntry] // ,
+    records: List[PutRecordsRequestEntry]
   ): F[Vector[PutRecordsRequestEntry]] =
     Logger[F].debug(s"Writing ${records.size} records to ${streamName}") *>
       Sync[F]
