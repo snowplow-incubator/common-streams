@@ -61,7 +61,4 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Str
 }
 
 object KinesisSinkSpec {
-  
-  // val KINESIS_INITIALIZE_STREAMS: String =
-    // List(s"$testStream1Name:1").mkString(",")
 }
