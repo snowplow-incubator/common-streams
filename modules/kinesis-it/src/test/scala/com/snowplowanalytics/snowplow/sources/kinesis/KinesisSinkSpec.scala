@@ -20,35 +20,37 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.regions.Region
 
 import com.snowplowanalytics.snowplow.it.kinesis._
-import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.sinks.Sinkable
 
 import Utils._
 
-class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sink[IO])] with SpecificationLike {
-  import KinesisSinkSpec._
+class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, String => KinesisSinkConfig)] with SpecificationLike {
 
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (Region, LocalStackContainer, Sink[IO])] =
+  override val resource: Resource[IO, (Region, LocalStackContainer, String => KinesisSinkConfig )] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
-      localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSinkSpec.getClass.getSimpleName)
-      testSink <- KinesisSink.resource[IO](getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
-    } yield (region, localstack, testSink)
+      localstack <- Localstack.resource(region,  KinesisSinkSpec.getClass.getSimpleName) 
+    } yield (region, localstack,  getKinesisSinkConfig(localstack.getEndpoint)(_))
 
   override def is = s2"""
   KinesisSinkSpec should
     write to output stream $e1
   """
 
-  def e1 = withResource { case (region, localstack, testSink) =>
+  def e1 = withResource { case (region, localstack, getKinesisSinkConfig) =>
+    val testStream1Name = "test-sink-stream-1"
     val testPayload = "test-payload"
     val testInput   = List(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
 
-    for {
-      kinesisClient <- getKinesisClient(localstack.getEndpoint, region)
-      _ <- testSink.sink(testInput)
+    val kinesisClient = getKinesisClient(localstack.getEndpoint, region)
+    createAndWaitForKinesisStream(kinesisClient, testStream1Name, 1): Unit
+    val testSinkResource = KinesisSink.resource[IO](getKinesisSinkConfig(testStream1Name))
+
+    for { 
+      _ <- testSinkResource.use(testSink => testSink.sink(testInput))
       _ <- IO.sleep(3.seconds)
       result = getDataFromKinesis(kinesisClient, testStream1Name)
     } yield List(
@@ -59,7 +61,7 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
 }
 
 object KinesisSinkSpec {
-  val testStream1Name = "test-sink-stream-1"
-  val KINESIS_INITIALIZE_STREAMS: String =
-    List(s"$testStream1Name:1").mkString(",")
+  
+  // val KINESIS_INITIALIZE_STREAMS: String =
+    // List(s"$testStream1Name:1").mkString(",")
 }

@@ -16,7 +16,6 @@ import org.specs2.mutable.SpecificationLike
 
 import org.testcontainers.containers.localstack.LocalStackContainer
 
-import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
@@ -26,31 +25,36 @@ import com.snowplowanalytics.snowplow.it.kinesis._
 import java.time.Instant
 
 import Utils._
+import software.amazon.awssdk.regions.Region
 
 class KinesisSourceSpec
-    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)]
+    extends CatsResource[IO, (Region, LocalStackContainer, String => KinesisSourceConfig)]
     with SpecificationLike {
-  import KinesisSourceSpec._
 
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
+  override val resource: Resource[IO, (Region, LocalStackContainer, String => KinesisSourceConfig)] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
-      localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)
-      kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
-    } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_))
+      localstack <- Localstack.resource(region, KinesisSourceSpec.getClass.getSimpleName)
+      // kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
+    } yield (region, localstack, getKinesisSourceConfig(localstack.getEndpoint)(_))
 
   override def is = s2"""
   KinesisSourceSpec should
     read from input stream $e1
   """
 
-  def e1 = withResource { case (_, kinesisClient, getKinesisSourceConfig) =>
+  def e1 = withResource { case (region, localstack, getKinesisSourceConfig) =>
     val testPayload = "test-payload"
+    val testStream1Name = "test-source-stream-1"
+
+    val kinesisClient = getKinesisClient(localstack.getEndpoint, region)
+    createAndWaitForKinesisStream(kinesisClient, testStream1Name, 1)
 
     for {
+
       refProcessed <- Ref[IO].of[List[ReceivedEvents]](Nil)
       t1 <- IO.realTimeInstant
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
@@ -74,7 +78,4 @@ class KinesisSourceSpec
 }
 
 object KinesisSourceSpec {
-  val testStream1Name = "test-source-stream-1"
-  val KINESIS_INITIALIZE_STREAMS: String =
-    List(s"$testStream1Name:1").mkString(",")
 }

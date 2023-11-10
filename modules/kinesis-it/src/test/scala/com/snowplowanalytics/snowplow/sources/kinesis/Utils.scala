@@ -17,7 +17,7 @@ import eu.timepit.refined.types.numeric.PosInt
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
-import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, GetShardIteratorRequest, PutRecordRequest, PutRecordResponse}
+import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, PutRecordRequest, PutRecordResponse, GetShardIteratorRequest, CreateStreamRequest}
 
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
@@ -34,6 +34,24 @@ import software.amazon.awssdk.services.kinesis.model.DescribeStreamRequest
 object Utils {
 
   case class ReceivedEvents(events: List[String], tstamp: Option[Instant])
+
+  def createAndWaitForKinesisStream(
+    client: KinesisAsyncClient,
+    streamName: String, 
+    shardCount: Int) = {
+    val createStreamReq = CreateStreamRequest
+      .builder().streamName(streamName)
+      .shardCount(shardCount)
+      .build()
+
+    val resp = client.createStream(createStreamReq).get
+
+    // Block till it's active
+    while (resp.sdkHttpResponse().isSuccessful() && (client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get.streamDescription.streamStatusAsString !=  "ACTIVE")) {
+      Thread.sleep(500)
+      println(client.describeStream(DescribeStreamRequest.builder().streamName(streamName).build()).get.streamDescription.streamStatusAsString)
+    }
+  }
 
   def putDataToKinesis(
     client: KinesisAsyncClient,
@@ -83,8 +101,14 @@ object Utils {
       .build()
 
     val out =
-      ReceivedEvents(client.getRecords(request).get().records().asScala.toList.map(record => new String(record.data.asByteArray())), None)
-    out
+      client.getRecords(request)
+      .get()
+      .records()
+      .asScala
+      .toList
+      .map(record => new String(record.data.asByteArray()))
+
+    ReceivedEvents(out, None)
   }
 
   def getKinesisSourceConfig(endpoint: URI)(streamName: String): KinesisSourceConfig = KinesisSourceConfig(
@@ -114,12 +138,11 @@ object Utils {
       } yield token
     }
 
-  def getKinesisClient(endpoint: URI, region: Region): IO[KinesisAsyncClient] =
-    IO(
+  def getKinesisClient(endpoint: URI, region: Region): KinesisAsyncClient =
       KinesisAsyncClient
         .builder()
         .endpointOverride(endpoint)
         .region(region)
         .build()
-    )
+
 }
