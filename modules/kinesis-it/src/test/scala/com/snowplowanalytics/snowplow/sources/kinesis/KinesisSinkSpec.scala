@@ -16,43 +16,42 @@ import org.specs2.mutable.SpecificationLike
 
 import org.testcontainers.containers.localstack.LocalStackContainer
 
-import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
+import software.amazon.awssdk.regions.Region
 
 import com.snowplowanalytics.snowplow.it.kinesis._
 import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
 
 import Utils._
 
-class KinesisSinkSpec extends CatsResource[IO, (String, LocalStackContainer, KinesisAsyncClient, Sink[IO])] with SpecificationLike {
+class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sink[IO])] with SpecificationLike {
   import KinesisSinkSpec._
 
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (String, LocalStackContainer, KinesisAsyncClient, Sink[IO])] =
+  override val resource: Resource[IO, (Region, LocalStackContainer, Sink[IO])] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSinkSpec.getClass.getSimpleName)
-      kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
       testSink <- KinesisSink.resource[IO](getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
-    } yield (region.toString, localstack, kinesisClient, testSink)
+    } yield (region, localstack,  testSink)
 
   override def is = s2"""
   KinesisSinkSpec should
     write to output stream $e1
   """
 
-  def e1 = withResource { case (region, _, kinesisClient, testSink) =>
+  def e1 = withResource { case (region, localstack, testSink) =>
     val testPayload = "test-payload"
     val testInput   = List(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
 
     for {
+      kinesisClient <- getKinesisClient(localstack.getEndpoint, region)
       _ <- testSink.sink(testInput)
       _ <- IO.sleep(3.seconds)
-      result = getDataFromKinesis(kinesisClient, region, testStream1Name)
+      result = getDataFromKinesis(kinesisClient, region.toString, testStream1Name)
     } yield List(
-      result.events must haveSize(1),
       result.events must haveSize(1),
       result.events must beEqualTo(List(testPayload))
     )

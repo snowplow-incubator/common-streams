@@ -9,11 +9,8 @@ package com.snowplowanalytics.snowplow.it.kinesis
 
 import cats.effect.{IO, Ref}
 
-// import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
-// import scala.jdk.FutureConverters._
-// import scala.concurrent.Await
 
 import eu.timepit.refined.types.numeric.PosInt
 
