@@ -77,7 +77,7 @@ object Utils {
 
     val request = GetRecordsRequest
       .builder()
-      .streamARN("arn:aws:kinesis:%s:000000000000:stream/%s".format(region, streamName))
+      .streamARN(s"arn:aws:kinesis:$region:000000000000:stream/$streamName")
       .shardIterator(shIter)
       .build()
 
