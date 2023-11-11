@@ -247,12 +247,7 @@ object KinesisSink {
   private object Retries {
 
     def fibonacci[F[_]: Applicative](config: BackoffPolicy): RetryPolicy[F] =
-      capBackoffAndRetries(config, RetryPolicies.fibonacciBackoff[F](config.minBackoff))
-
-    private def capBackoffAndRetries[F[_]: Applicative](config: BackoffPolicy, policy: RetryPolicy[F]): RetryPolicy[F] = {
-      val capped = RetryPolicies.capDelay[F](config.maxBackoff, policy)
-      config.maxRetries.fold(capped)(max => capped.join(RetryPolicies.limitRetries(max)))
-    }
+      RetryPolicies.capDelay[F](config.maxBackoff, RetryPolicies.fibonacciBackoff[F](config.minBackoff))
   }
 
   private def getRecordSize(record: PutRecordsRequestEntry) =

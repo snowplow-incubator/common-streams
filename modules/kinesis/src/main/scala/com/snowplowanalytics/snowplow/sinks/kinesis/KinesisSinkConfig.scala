@@ -16,8 +16,7 @@ import java.net.URI
 
 case class BackoffPolicy(
   minBackoff: FiniteDuration,
-  maxBackoff: FiniteDuration,
-  maxRetries: Option[Int]
+  maxBackoff: FiniteDuration
 )
 
 object BackoffPolicy {
