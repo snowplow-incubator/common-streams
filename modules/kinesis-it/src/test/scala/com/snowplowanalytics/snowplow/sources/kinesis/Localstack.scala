@@ -19,13 +19,11 @@ object Localstack {
 
   def resource(
     region: Region,
-    kinesisInitializeStreams: String,
     loggerName: String
   ): Resource[IO, LocalStackContainer] =
     Resource.make {
       val localstack = new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.2.0"))
       localstack.addEnv("AWS_DEFAULT_REGION", region.id)
-      localstack.addEnv("KINESIS_INITIALIZE_STREAMS", kinesisInitializeStreams)
       localstack.addExposedPort(4566)
       localstack.setWaitStrategy(Wait.forLogMessage(".*Ready.*", 1))
       IO(startLocalstack(localstack, loggerName))
