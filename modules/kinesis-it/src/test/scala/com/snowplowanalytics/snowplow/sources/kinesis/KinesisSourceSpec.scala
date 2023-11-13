@@ -36,7 +36,6 @@ class KinesisSourceSpec extends CatsResource[IO, (Region, LocalStackContainer, S
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KinesisSourceSpec.getClass.getSimpleName)
-      // kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
     } yield (region, localstack, getKinesisSourceConfig(localstack.getEndpoint)(_))
 
   override def is = s2"""
