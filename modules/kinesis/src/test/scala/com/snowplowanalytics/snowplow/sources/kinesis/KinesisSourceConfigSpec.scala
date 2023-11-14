@@ -8,14 +8,22 @@
 package com.snowplowanalytics.snowplow.sources.kinesis
 
 import io.circe.literal._
+import com.typesafe.config.ConfigFactory
+import eu.timepit.refined.types.all.PosInt
+import io.circe.config.syntax.CirceConfigOps
+import io.circe.Decoder
+import io.circe.generic.semiauto._
 import org.specs2.Specification
 
 class KinesisSourceConfigSpec extends Specification {
+  import KinesisSourceConfigSpec._
 
   def is = s2"""
   The KinesisSource decoder should:
     Decode a valid JSON config with PascalCase type hints $e1
     Decode a valid JSON config with CAPITALIZED type hints $e2
+  The KinesisSource defaults should:
+    Provide default values from reference.conf $e3
   """
 
   def e1 = {
@@ -72,4 +80,39 @@ class KinesisSourceConfigSpec extends Specification {
     }
   }
 
+  def e3 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.kinesis}
+    |   "xyz": {
+    |     "appName": "my-app"
+    |     "streamName": "my-stream"
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    val expected = KinesisSourceConfig(
+      appName                  = "my-app",
+      streamName               = "my-stream",
+      initialPosition          = KinesisSourceConfig.InitialPosition.Latest,
+      retrievalMode            = KinesisSourceConfig.Retrieval.Polling(1000),
+      bufferSize               = PosInt.unsafeFrom(1),
+      customEndpoint           = None,
+      dynamodbCustomEndpoint   = None,
+      cloudwatchCustomEndpoint = None
+    )
+
+    result.as[Wrapper] must beRight.like { case w: Wrapper =>
+      w.xyz must beEqualTo(expected)
+    }
+  }
+
+}
+
+object KinesisSourceConfigSpec {
+  case class Wrapper(xyz: KinesisSourceConfig)
+
+  implicit def wrapperDecoder: Decoder[Wrapper] = deriveDecoder[Wrapper]
 }

@@ -5,9 +5,8 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.sinks.kinesis
+package com.snowplowanalytics.snowplow.sources.pubsub
 
-import io.circe.literal._
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
@@ -16,32 +15,33 @@ import org.specs2.Specification
 
 import scala.concurrent.duration.DurationLong
 
-class KinesisSinkConfigSpec extends Specification {
-  import KinesisSinkConfigSpec._
+class PubsubSourceConfigSpec extends Specification {
+  import PubsubSourceConfigSpec._
 
   def is = s2"""
-  The KinesisSink defaults should:
+  The PubsubSource defaults should:
     Provide default values from reference.conf $e1
   """
 
   def e1 = {
     val input = s"""
     |{
-    |   "xyz": $${snowplow.defaults.sinks.kinesis}
+    |   "xyz": $${snowplow.defaults.sources.pubsub}
     |   "xyz": {
-    |     "streamName": "my-stream"
+    |     "subscription": "projects/my-project/subscriptions/my-subscription"
     |   }
     |}
     |""".stripMargin
 
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
-    val expected = KinesisSinkConfig(
-      streamName             = "my-stream",
-      throttledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second, maxRetries = None),
-      recordLimit            = 500,
-      byteLimit              = 5242880,
-      customEndpoint         = None
+    val expected = PubsubSourceConfig(
+      subscription               = PubsubSourceConfig.Subscription("my-project", "my-subscription"),
+      parallelPullCount          = 3,
+      bufferMaxBytes             = 1000000,
+      maxAckExtensionPeriod      = 1.hour,
+      minDurationPerAckExtension = 1.minute,
+      maxDurationPerAckExtension = 10.minutes
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>
@@ -51,8 +51,8 @@ class KinesisSinkConfigSpec extends Specification {
 
 }
 
-object KinesisSinkConfigSpec {
-  case class Wrapper(xyz: KinesisSinkConfig)
+object PubsubSourceConfigSpec {
+  case class Wrapper(xyz: PubsubSourceConfig)
 
   implicit def wrapperDecoder: Decoder[Wrapper] = deriveDecoder[Wrapper]
 }

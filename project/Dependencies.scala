@@ -146,14 +146,16 @@ object Dependencies {
     fs2Kafka,
     circeConfig,
     circeGeneric,
-    snappy
+    snappy,
+    specs2
   )
 
   val pubsubDependencies = Seq(
     pubsub,
     circeConfig,
     circeGeneric,
-    collectionCompat
+    collectionCompat,
+    specs2
   )
 
   val runtimeCommonDependencies = Seq(

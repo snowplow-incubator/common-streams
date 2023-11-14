@@ -17,6 +17,8 @@ import com.snowplowanalytics.snowplow.scalatracker.emitters.http4s._
 import fs2.Stream
 import io.circe._
 import io.circe.syntax._
+import io.circe.config.syntax._
+import io.circe.generic.semiauto._
 import org.http4s.client.{Client => HttpClient}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -39,6 +41,10 @@ object Telemetry {
     moduleName: Option[String],
     moduleVersion: Option[String]
   )
+
+  object Config {
+    implicit def telemetryConfigDecoder: Decoder[Config] = deriveDecoder
+  }
 
   private implicit def unsafeLogger[F[_]: Sync]: Logger[F] =
     Slf4jLogger.getLogger[F]
