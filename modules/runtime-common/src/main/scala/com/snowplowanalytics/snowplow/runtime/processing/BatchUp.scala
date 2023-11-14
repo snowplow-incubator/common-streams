@@ -61,26 +61,10 @@ object BatchUp {
           Pull.outputOption1[F, A](wasPending) *> go(next, None)
         case Some((Right(chunk), next)) =>
           // Upstream emitted something to us. We might already have a pending element.
-          combineByWeight(maxWeight, Chunk.fromOption(wasPending) ++ chunk) match {
-            case CombineByWeightResult(None, toEmit) =>
-              // We're emitting everything so cancel any existing timeout
-              Pull.output[F, A](Chunk.from(toEmit)) *>
-                next.timeout(Duration.Zero) *>
-                go(next, None)
-            case CombineByWeightResult(Some(notAtSize), toEmit) =>
-              // We are not emitting everything; there will be a new pending element.
-              val setTimeout = if (toEmit.nonEmpty || wasPending.isEmpty) {
-                // There is no existing timeout on the pending element, so start a new timeout
-                next.timeout(maxDelay)
-              } else {
-                // There must already by a timeout on the pending element
-                Pull.pure(())
-              }
-
-              Pull.output[F, A](Chunk.from(toEmit)) *>
-                setTimeout *>
-                go(next, Some(notAtSize))
-          }
+          val result = combineByWeight(maxWeight, Chunk.fromOption(wasPending) ++ chunk)
+          Pull.output[F, A](Chunk.from(result.toEmit)) *>
+            handleTimerReset(wasPending, result, next, maxDelay) *>
+            go(next, result.notAtSize)
       }
 
     in =>
@@ -166,5 +150,36 @@ object BatchUp {
           else
             CombineByWeightResult(Some(notAtSize |+| next), toEmit)
         }
+    }
+
+  /**
+   * Resets the timeout if needed.
+   *
+   * @param wasPending
+   *   whatever was already pending before we received a new chunk to emit. If this is non-empty
+   *   then there must be an existing timeout already set.
+   * @param result
+   *   the result of combining the new chunk with any pending chunk. Tells us what will be emitted
+   *   and what will be pending due to not yet at size.
+   * @param timedPull
+   *   the TimedPull that manages timeouts
+   * @param maxDelay
+   *   value to use for a new timeout, if needed
+   */
+  private def handleTimerReset[F[_], A](
+    wasPending: Option[A],
+    result: CombineByWeightResult[A],
+    timedPull: Pull.Timed[F, A],
+    maxDelay: FiniteDuration
+  ): Pull[F, Nothing, Unit] =
+    if (result.notAtSize.isEmpty) {
+      // We're emitting everything so cancel any existing timeout
+      timedPull.timeout(Duration.Zero)
+    } else if (result.toEmit.nonEmpty || wasPending.isEmpty) {
+      // There is no existing timeout on the pending element, so start a new timeout
+      timedPull.timeout(maxDelay)
+    } else {
+      // There must already by a timeout on the pending element
+      Pull.pure(())
     }
 }
