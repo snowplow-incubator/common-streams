@@ -169,6 +169,8 @@ object Dependencies {
     tracker,
     trackerEmit,
     specs2,
+    catsEffectSpecs2,
+    catsEffectTestkit,
     circeLiteral % Test
   )
 
