@@ -38,7 +38,7 @@ object Dependencies {
 
     // Snowplow
     val schemaDdl    = "0.21.0"
-    val badrows      = "2.2.1"
+    val badrows      = "2.3.0"
     val igluClient   = "3.1.0"
     val tracker      = "2.0.0"
     val analyticsSdk = "3.1.0"
