@@ -14,7 +14,7 @@ import cats.Foldable
 import com.google.api.core.{ApiFuture, ApiFutures}
 import com.google.api.gax.batching.BatchingSettings
 import com.google.cloud.pubsub.v1.Publisher
-import com.google.protobuf.ByteString
+import com.google.protobuf.UnsafeSnowplowOps
 import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
 import com.snowplowanalytics.snowplow.pubsub.FutureInterop
 import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
@@ -37,7 +37,7 @@ object PubsubSink {
         for {
           uuid <- Async[F].delay(UUID.randomUUID)
           message = PubsubMessage.newBuilder
-                      .setData(ByteString.copyFrom(bytes))
+                      .setData(UnsafeSnowplowOps.wrapBytes(bytes))
                       .setMessageId(uuid.toString)
                       .putAllAttributes(attributes.asJava)
                       .build
