@@ -8,7 +8,7 @@
 package com.snowplowanalytics.snowplow.sinks.kinesis
 
 import cats.implicits._
-import cats.{Applicative, Monoid, Parallel}
+import cats.{Applicative, Parallel}
 import cats.effect.{Async, Resource, Sync}
 import cats.effect.kernel.Ref
 
@@ -30,7 +30,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 
 import scala.jdk.CollectionConverters._
 
-import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
 
 object KinesisSink {
 
@@ -70,7 +70,7 @@ object KinesisSink {
    * big as possible with respecting the record limit and the size limit.
    */
   private[kinesis] def group[A](
-    records: List[A],
+    records: ListOfList[A],
     recordLimit: Int,
     sizeLimit: Int,
     getRecordSize: A => Int
@@ -112,8 +112,8 @@ object KinesisSink {
     kinesis.putRecords(putRecordsRequest)
   }
 
-  private def toKinesisRecords(records: List[Sinkable]): List[PutRecordsRequestEntry] =
-    records.map { r =>
+  private def toKinesisRecords(records: ListOfList[Sinkable]): ListOfList[PutRecordsRequestEntry] =
+    records.mapUnordered { r =>
       val data = SdkBytes.fromByteArrayUnsafe(r.bytes)
       val prre = PutRecordsRequestEntry
         .builder()
@@ -133,23 +133,12 @@ object KinesisSink {
    *   A message to help with logging
    */
   private case class TryBatchResult(
-    nextBatchAttempt: Vector[PutRecordsRequestEntry],
+    nextBatchAttempt: List[PutRecordsRequestEntry],
     hadNonThrottleErrors: Boolean,
     exampleInternalError: Option[String]
   )
 
   private object TryBatchResult {
-
-    implicit private def tryBatchResultMonoid: Monoid[TryBatchResult] =
-      new Monoid[TryBatchResult] {
-        override val empty: TryBatchResult = TryBatchResult(Vector.empty, false, None)
-        override def combine(x: TryBatchResult, y: TryBatchResult): TryBatchResult =
-          TryBatchResult(
-            x.nextBatchAttempt ++ y.nextBatchAttempt,
-            x.hadNonThrottleErrors || y.hadNonThrottleErrors,
-            x.exampleInternalError.orElse(y.exampleInternalError)
-          )
-      }
 
     /**
      * The build method creates a TryBatchResult, which:
@@ -164,21 +153,21 @@ object KinesisSink {
       if (prr.failedRecordCount().toInt =!= 0)
         records
           .zip(prr.records().asScala)
-          .foldMap { case (orig, recordResult) =>
+          .foldLeft(TryBatchResult(Nil, false, None)) { case (acc, (orig, recordResult)) =>
             Option(recordResult.errorCode()) match {
               // If the record had no error, treat as success
-              case None =>
-                TryBatchResult(Vector.empty, false, None)
+              case None => acc
               // If it had a throughput exception, mark that and provide the original
               case Some("ProvisionedThroughputExceededException") =>
-                TryBatchResult(Vector(orig), false, None)
+                acc.copy(nextBatchAttempt = orig :: acc.nextBatchAttempt)
               // If any other error, mark success and throttled false for this record, and provide the original
               case Some(_) =>
-                TryBatchResult(Vector(orig), true, Option(recordResult.errorMessage()))
+                TryBatchResult(orig :: acc.nextBatchAttempt, true, acc.exampleInternalError.orElse(Option(recordResult.errorMessage())))
+
             }
           }
       else
-        TryBatchResult(Vector.empty, false, None)
+        TryBatchResult(Nil, false, None)
   }
 
   /**
@@ -192,7 +181,7 @@ object KinesisSink {
     streamName: String,
     kinesis: KinesisClient,
     records: List[PutRecordsRequestEntry]
-  ): F[Vector[PutRecordsRequestEntry]] =
+  ): F[List[PutRecordsRequestEntry]] =
     Logger[F].debug(s"Writing ${records.size} records to ${streamName}") *>
       Sync[F]
         .blocking(putRecords(kinesis, streamName, records))
@@ -211,23 +200,23 @@ object KinesisSink {
     requestLimits: RequestLimits,
     kinesis: KinesisClient,
     streamName: String,
-    records: List[Sinkable]
+    records: ListOfList[Sinkable]
   ): F[Unit] = {
     val policyForThrottling = Retries.fibonacci[F](throttlingErrorsPolicy)
 
     // First, tryWriteToKinesis - the AWS SDK will handle retries. If there are still failures after that, it will:
     // - return messages for retries if we only hit throttliing
     // - raise an error if we still have non-throttle failures after the SDK has carried out retries
-    def runAndCaptureFailures(ref: Ref[F, List[PutRecordsRequestEntry]]): F[List[PutRecordsRequestEntry]] =
+    def runAndCaptureFailures(ref: Ref[F, ListOfList[PutRecordsRequestEntry]]): F[ListOfList[PutRecordsRequestEntry]] =
       for {
         records <- ref.get
         failures <- group(records, requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
                       .parTraverse(g => tryWriteToKinesis(streamName, kinesis, g))
-        flattened = failures.flatten
-        _ <- ref.set(flattened)
-      } yield flattened
+        listOfList = ListOfList.of(failures)
+        _ <- ref.set(listOfList)
+      } yield listOfList
     for {
-      ref <- Ref.of[F, List[PutRecordsRequestEntry]](toKinesisRecords(records))
+      ref <- Ref.of[F, ListOfList[PutRecordsRequestEntry]](toKinesisRecords(records))
       failures <- runAndCaptureFailures(ref)
                     .retryingOnFailures(
                       policy        = policyForThrottling,
@@ -268,7 +257,7 @@ object KinesisSink {
   }
 
   private def failureMessageForThrottling(
-    records: List[PutRecordsRequestEntry],
+    records: ListOfList[PutRecordsRequestEntry],
     streamName: String
   ): String =
     s"Exceeded Kinesis provisioned throughput: ${records.size} records failed writing to $streamName."

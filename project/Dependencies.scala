@@ -113,6 +113,7 @@ object Dependencies {
     fs2,
     log4cats,
     catsRetry,
+    collectionCompat,
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,

@@ -12,7 +12,6 @@ import cats.effect.kernel.Resource
 import cats.implicits._
 import cats.Monad
 import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
-import fs2.Chunk
 import fs2.kafka._
 
 import java.util.UUID
@@ -32,7 +31,7 @@ object KafkaSink {
 
   private def fromFs2Producer[F[_]: Monad](config: KafkaSinkConfig, producer: KafkaProducer[F, String, Array[Byte]]): Sink[F] =
     Sink { batch =>
-      val records = Chunk.from(batch.map(toProducerRecord(config, _)))
+      val records = batch.copyToChunk.map(toProducerRecord(config, _))
       producer.produce(records).flatten.void
     }
 

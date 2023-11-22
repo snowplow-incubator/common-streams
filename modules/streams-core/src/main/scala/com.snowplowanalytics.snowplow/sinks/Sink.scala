@@ -17,17 +17,17 @@ trait Sink[F[_]] {
   /**
    * Writes a batch of events to the external sink, handling partition keys and message attributes
    */
-  def sink(batch: List[Sinkable]): F[Unit]
+  def sink(batch: ListOfList[Sinkable]): F[Unit]
 
   /** Writes a batch of events to the sink using an empty partition key and attributes */
-  def sinkSimple(batch: List[Array[Byte]]): F[Unit] =
-    sink(batch.map(Sinkable(_, None, Map.empty)))
+  def sinkSimple(batch: ListOfList[Array[Byte]]): F[Unit] =
+    sink(batch.mapUnordered(Sinkable(_, None, Map.empty)))
 
 }
 
 object Sink {
 
-  def apply[F[_]](f: List[Sinkable] => F[Unit]): Sink[F] = new Sink[F] {
-    def sink(batch: List[Sinkable]): F[Unit] = f(batch)
+  def apply[F[_]](f: ListOfList[Sinkable] => F[Unit]): Sink[F] = new Sink[F] {
+    def sink(batch: ListOfList[Sinkable]): F[Unit] = f(batch)
   }
 }

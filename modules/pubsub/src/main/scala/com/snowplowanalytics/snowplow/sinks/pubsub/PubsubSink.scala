@@ -17,7 +17,7 @@ import com.google.cloud.pubsub.v1.Publisher
 import com.google.protobuf.UnsafeSnowplowOps
 import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
 import com.snowplowanalytics.snowplow.pubsub.FutureInterop
-import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 import scala.jdk.CollectionConverters._
@@ -31,8 +31,8 @@ object PubsubSink {
       Sink(sinkBatch[F](p, _))
     }
 
-  private def sinkBatch[F[_]: Async](publisher: Publisher, batch: List[Sinkable]): F[Unit] =
-    Foldable[List]
+  private def sinkBatch[F[_]: Async](publisher: Publisher, batch: ListOfList[Sinkable]): F[Unit] =
+    Foldable[ListOfList]
       .foldM(batch, List.empty[ApiFuture[String]]) { case (futures, Sinkable(bytes, _, attributes)) =>
         for {
           uuid <- Async[F].delay(UUID.randomUUID)

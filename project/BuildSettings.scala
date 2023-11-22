@@ -40,6 +40,7 @@ object BuildSettings {
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
     scalacOptions += "-Ywarn-macros:after",
+    scalacOptions += "-Wconf:origin=scala.collection.compat.*:s",
     Test / fork := true,
     addCompilerPlugin(Dependencies.betterMonadicFor),
     ThisBuild / autoAPIMappings := true,
