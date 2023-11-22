@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.runtime.processing
 
-import cats.{Foldable, Semigroup}
+import cats.Foldable
 import cats.implicits._
 import cats.effect.{Async, Sync}
 import fs2.{Chunk, Pipe, Pull, Stream}
@@ -24,12 +24,14 @@ object BatchUp {
    * @note
    *   typically "weight" means "number of bytes". But it could also be any other measurement.
    */
-  trait Batchable[A] extends Semigroup[A] {
+  trait Batchable[A, B] {
     def weightOf(a: A): Long
+    def single(a: A): B
+    def combine(b: B, a: A): B
   }
 
   object Batchable {
-    def apply[A](implicit batchable: Batchable[A]): Batchable[A] = batchable
+    def apply[A, B](implicit batchable: Batchable[A, B]): Batchable[A, B] = batchable
   }
 
   /**
@@ -49,22 +51,22 @@ object BatchUp {
    * @return
    *   A FS2 Pipe which combines small `A`s to bigger `A`s.
    */
-  def withTimeout[F[_]: Async, A: Batchable](maxWeight: Long, maxDelay: FiniteDuration): Pipe[F, A, A] = {
+  def withTimeout[F[_]: Async, A, B: Batchable[A, *]](maxWeight: Long, maxDelay: FiniteDuration): Pipe[F, A, B] = {
 
-    def go(timedPull: Pull.Timed[F, A], wasPending: Option[A]): Pull[F, A, Unit] =
+    def go(timedPull: Pull.Timed[F, A], wasPending: Option[BatchWithWeight[B]]): Pull[F, B, Unit] =
       timedPull.uncons.flatMap {
         case None =>
           // Upstream finished cleanly. Emit whatever is pending and we're done.
-          Pull.outputOption1[F, A](wasPending) *> Pull.done
+          Pull.outputOption1[F, B](wasPending.map(_.value)) *> Pull.done
         case Some((Left(_), next)) =>
           // Timer timed-out. Emit whatever is pending.
-          Pull.outputOption1[F, A](wasPending) *> go(next, None)
+          Pull.outputOption1[F, B](wasPending.map(_.value)) *> go(next, None)
         case Some((Right(chunk), next)) =>
           // Upstream emitted something to us. We might already have a pending element.
-          val result = combineByWeight(maxWeight, Chunk.fromOption(wasPending) ++ chunk)
-          Pull.output[F, A](Chunk.from(result.toEmit)) *>
+          val result: CombineByWeightResult[B] = combineByWeight[A, B](maxWeight, wasPending, chunk)
+          Pull.output[F, B](Chunk.from(result.toEmit)) *>
             handleTimerReset(wasPending, result, next, maxDelay) *>
-            go(next, result.notAtSize)
+            go(next, result.doNotEmitYet)
       }
 
     in =>
@@ -93,62 +95,75 @@ object BatchUp {
    * @return
    *   A FS2 Pipe which combines small `A`s to bigger `A`s.
    */
-  def noTimeout[F[_]: Sync, A: Batchable](maxWeight: Long): Pipe[F, A, A] = {
-    def go(stream: Stream[F, A], unflushed: Option[A]): Pull[F, A, Unit] =
+  def noTimeout[F[_]: Sync, A, B: Batchable[A, *]](maxWeight: Long): Pipe[F, A, B] = {
+    def go(stream: Stream[F, A], unflushed: Option[BatchWithWeight[B]]): Pull[F, B, Unit] =
       stream.pull.uncons.flatMap {
         case None =>
           // Upstream finished cleanly. Emit whatever is pending and we're done.
-          Pull.outputOption1[F, A](unflushed) *> Pull.done
+          Pull.outputOption1[F, B](unflushed.map(_.value)) *> Pull.done
         case Some((chunk, next)) =>
-          val CombineByWeightResult(notAtSize, toEmit) = combineByWeight(maxWeight, Chunk.fromOption(unflushed) ++ chunk)
-          Pull.output[F, A](Chunk.from(toEmit)) *>
-            go(next, notAtSize)
+          val result = combineByWeight(maxWeight, unflushed, chunk)
+          Pull.output[F, B](Chunk.from(result.toEmit)) *>
+            go(next, result.doNotEmitYet)
       }
 
     in => go(in, None).stream
   }
 
+  private case class BatchWithWeight[B](value: B, weight: Long)
+
   /**
-   * The result of combining a chunk of `A`s, while not exceeding total weight.
+   * The result of try to combine a chunk of `A`s, while not exceeding total weight.
    *
-   * @param notAtSize
-   *   Optionally an `A` that does not yet exceed the maximum allowed size. We should not emit this
-   *   `A` but instead wait in case we can combine it with other `A`s later.
+   * @param doNotEmitYet
+   *   Optionally a batch `B` that does not yet exceed the maximum allowed size. We should not emit
+   *   this `B` but instead wait in case we can combine it with other `A`s later.
    * @param toEmit
-   *   The combined `A`s which meet size requirements. These should be emitted downstream because we
+   *   The combined `B`s which meet size requirements. These should be emitted downstream because we
    *   cannot combine them with anything more.
    */
-  private case class CombineByWeightResult[A](notAtSize: Option[A], toEmit: Vector[A])
+  private case class CombineByWeightResult[B](
+    doNotEmitYet: Option[BatchWithWeight[B]],
+    toEmit: Vector[B]
+  )
 
   /**
    * Combine a chunk of `A`s, while not exceeding the max allowed weight
    *
    * @param maxWeight
    *   the maximum allowed weight (e.g. max allowed number of bytes)
+   * @param notAtSize
+   *   optionally a batch we have pending because it was not yet at size
    * @param chunk
    *   the `A`s we need to combine into larger `A`s.
    * @return
    *   The result of combining `A`s
    */
-  private def combineByWeight[A: Batchable](maxWeight: Long, chunk: Chunk[A]): CombineByWeightResult[A] =
-    Foldable[Chunk].foldLeft(chunk, CombineByWeightResult[A](None, Vector.empty)) {
+  private def combineByWeight[A, B](
+    maxWeight: Long,
+    notAtSize: Option[BatchWithWeight[B]],
+    chunk: Chunk[A]
+  )(implicit B: Batchable[A, B]
+  ): CombineByWeightResult[B] =
+    Foldable[Chunk].foldLeft(chunk, CombineByWeightResult[B](notAtSize, Vector.empty)) {
       case (CombineByWeightResult(None, toEmit), next) =>
-        if (Batchable[A].weightOf(next) >= maxWeight)
-          CombineByWeightResult(None, toEmit :+ next)
-        else
-          CombineByWeightResult(Some(next), toEmit)
-      case (CombineByWeightResult(Some(notAtSize), toEmit), next) =>
-        val nextWeight = Batchable[A].weightOf(next)
+        val nextWeight = B.weightOf(next)
         if (nextWeight >= maxWeight)
-          CombineByWeightResult(None, toEmit :+ notAtSize :+ next)
+          CombineByWeightResult(None, toEmit :+ B.single(next))
+        else
+          CombineByWeightResult(Some(BatchWithWeight(B.single(next), nextWeight)), toEmit)
+      case (CombineByWeightResult(Some(notAtSize), toEmit), next) =>
+        val nextWeight = B.weightOf(next)
+        if (nextWeight >= maxWeight)
+          CombineByWeightResult(None, toEmit :+ notAtSize.value :+ B.single(next))
         else {
-          val notAtSizeWeight = Batchable[A].weightOf(notAtSize)
-          if (nextWeight + notAtSizeWeight > maxWeight)
-            CombineByWeightResult(Some(next), toEmit :+ notAtSize)
-          else if (nextWeight + notAtSizeWeight === maxWeight)
-            CombineByWeightResult(None, toEmit :+ (notAtSize |+| next))
+          val combinedWeight = nextWeight + notAtSize.weight
+          if (combinedWeight > maxWeight)
+            CombineByWeightResult(Some(BatchWithWeight(B.single(next), nextWeight)), toEmit :+ notAtSize.value)
+          else if (combinedWeight === maxWeight)
+            CombineByWeightResult(None, toEmit :+ B.combine(notAtSize.value, next))
           else
-            CombineByWeightResult(Some(notAtSize |+| next), toEmit)
+            CombineByWeightResult(Some(BatchWithWeight(B.combine(notAtSize.value, next), combinedWeight)), toEmit)
         }
     }
 
@@ -166,13 +181,13 @@ object BatchUp {
    * @param maxDelay
    *   value to use for a new timeout, if needed
    */
-  private def handleTimerReset[F[_], A](
-    wasPending: Option[A],
-    result: CombineByWeightResult[A],
+  private def handleTimerReset[F[_], A, B](
+    wasPending: Option[BatchWithWeight[B]],
+    result: CombineByWeightResult[B],
     timedPull: Pull.Timed[F, A],
     maxDelay: FiniteDuration
   ): Pull[F, Nothing, Unit] =
-    if (result.notAtSize.isEmpty) {
+    if (result.doNotEmitYet.isEmpty) {
       // We're emitting everything so cancel any existing timeout
       timedPull.timeout(Duration.Zero)
     } else if (result.toEmit.nonEmpty || wasPending.isEmpty) {

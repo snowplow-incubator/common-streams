@@ -43,6 +43,7 @@ object BuildSettings {
     scalacOptions += "-Wconf:origin=scala.collection.compat.*:s",
     Test / fork := true,
     addCompilerPlugin(Dependencies.betterMonadicFor),
+    addCompilerPlugin(Dependencies.kindProjector),
     ThisBuild / autoAPIMappings := true,
     ThisBuild / dynverVTagPrefix := false, // Otherwise git tags required to have v-prefix
     ThisBuild / dynverSeparator := "-", // to be compatible with docker

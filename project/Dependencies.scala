@@ -22,6 +22,7 @@ object Dependencies {
     val circeExtra       = "0.14.3"
     val circeConfig      = "0.10.0"
     val betterMonadicFor = "0.3.1"
+    val kindProjector    = "0.13.2"
     val collectionCompat = "2.11.0"
     val refined          = "0.11.0"
 
@@ -64,6 +65,7 @@ object Dependencies {
   val circeGenericExtra = "io.circe"               %% "circe-generic-extras"    % V.circeExtra
   val circeLiteral      = "io.circe"               %% "circe-literal"           % V.circe
   val betterMonadicFor  = "com.olegpy"             %% "better-monadic-for"      % V.betterMonadicFor
+  val kindProjector     = "org.typelevel"          %% "kind-projector"          % V.kindProjector cross CrossVersion.full
   val collectionCompat  = "org.scala-lang.modules" %% "scala-collection-compat" % V.collectionCompat
   val refined           = "eu.timepit"             %% "refined"                 % V.refined
 

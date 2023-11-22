@@ -21,8 +21,9 @@ class BatchUpSpec extends Specification with CatsEffect {
   def is = s2"""
   The BatchUp pipe without timeout should:
     Combine strings, respecting max size $noTimeout1
-    Combine strings, respecting max size, for Stream comprising random-sized Chunks $noTimeout2
-    Wait until stream ends before emitting an under-sized element $noTimeout3
+    Combine strings, respecting max size for elements of different sizes $noTimeout2
+    Combine strings, respecting max size, for Stream comprising random-sized Chunks $noTimeout3
+    Wait until stream ends before emitting an under-sized element $noTimeout4
   The BatchUp pipe with timeout should:
     Combine strings, respecting max size $timeout1
     Combine strings, respecting max size, for Stream comprising random-sized Chunks $timeout2
@@ -33,7 +34,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def noTimeout1 = {
     val input    = Stream("a", "b", "c", "d", "e", "f", "g", "h")
-    val pipe     = BatchUp.noTimeout[IO, String](3)
+    val pipe     = BatchUp.noTimeout[IO, String, String](3)
     val expected = List("abc", "def", "gh")
 
     for {
@@ -42,9 +43,9 @@ class BatchUpSpec extends Specification with CatsEffect {
   }
 
   def noTimeout2 = {
-    val input    = Stream("a", "b", "c", "d", "e", "f", "g", "h").rechunkRandomly(0.0, 2.0)
-    val pipe     = BatchUp.noTimeout[IO, String](3)
-    val expected = List("abc", "def", "gh")
+    val input    = Stream("a", "bb", "ccc", "dd", "eeeee", "f", "gggggggggg")
+    val pipe     = BatchUp.noTimeout[IO, String, String](5)
+    val expected = List("abb", "cccdd", "eeeee", "f", "gggggggggg")
 
     for {
       result <- input.through(pipe).compile.toList
@@ -52,8 +53,18 @@ class BatchUpSpec extends Specification with CatsEffect {
   }
 
   def noTimeout3 = {
+    val input    = Stream("a", "b", "c", "d", "e", "f", "g", "h").rechunkRandomly(0.0, 2.0)
+    val pipe     = BatchUp.noTimeout[IO, String, String](3)
+    val expected = List("abc", "def", "gh")
+
+    for {
+      result <- input.through(pipe).compile.toList
+    } yield result must beEqualTo(expected)
+  }
+
+  def noTimeout4 = {
     val input = Stream("a", "b", "c", "d") ++ Stream.sleep_[IO](5.minutes)
-    val pipe  = BatchUp.noTimeout[IO, String](3)
+    val pipe  = BatchUp.noTimeout[IO, String, String](3)
 
     val test = input.through(pipe).evalMap { str =>
       // emit the string + the time the string was emitted by the pipe under test
@@ -71,7 +82,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def timeout1 = {
     val input    = Stream("a", "b", "c", "d", "e", "f", "g", "h")
-    val pipe     = BatchUp.withTimeout[IO, String](3, 1.second)
+    val pipe     = BatchUp.withTimeout[IO, String, String](3, 1.second)
     val expected = List("abc", "def", "gh")
 
     for {
@@ -81,7 +92,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def timeout2 = {
     val input    = Stream("a", "b", "c", "d", "e", "f", "g", "h").rechunkRandomly(0.0, 2.0)
-    val pipe     = BatchUp.withTimeout[IO, String](3, 1.second)
+    val pipe     = BatchUp.withTimeout[IO, String, String](3, 1.second)
     val expected = List("abc", "def", "gh")
 
     for {
@@ -91,7 +102,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def timeout3 = {
     val input = Stream("a", "b") ++ Stream.sleep_[IO](5.minutes) ++ Stream("c", "d", "e", "f")
-    val pipe  = BatchUp.withTimeout[IO, String](3, 1.second)
+    val pipe  = BatchUp.withTimeout[IO, String, String](3, 1.second)
 
     val test = input.through(pipe).evalMap { str =>
       // emit the string + the time the string was emitted by the pipe under test
@@ -109,7 +120,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def timeout4 = {
     val input = Stream("a", "b") ++ Stream.sleep_[IO](5.seconds) ++ Stream("c", "d")
-    val pipe  = BatchUp.withTimeout[IO, String](3, 10.seconds)
+    val pipe  = BatchUp.withTimeout[IO, String, String](3, 10.seconds)
 
     val test = input.through(pipe).evalMap { str =>
       // emit the string + the time the string was emitted by the pipe under test
@@ -127,7 +138,7 @@ class BatchUpSpec extends Specification with CatsEffect {
 
   def timeout5 = {
     val input = Stream("a", "b", "c", "d") ++ Stream.sleep_[IO](10.seconds)
-    val pipe  = BatchUp.withTimeout[IO, String](3, 60.seconds)
+    val pipe  = BatchUp.withTimeout[IO, String, String](3, 60.seconds)
 
     val test = input.through(pipe).evalMap { str =>
       // emit the string + the time the string was emitted by the pipe under test
@@ -147,9 +158,10 @@ class BatchUpSpec extends Specification with CatsEffect {
 
 object BatchUpSpec {
 
-  implicit val stringBatchable: BatchUp.Batchable[String] = new BatchUp.Batchable[String] {
-    def combine(x: String, y: String): String = s"$x$y"
-    def weightOf(x: String): Long             = x.length.toLong
+  implicit val stringBatchable: BatchUp.Batchable[String, String] = new BatchUp.Batchable[String, String] {
+    def single(a: String): String             = a
+    def combine(b: String, a: String): String = s"$b$a"
+    def weightOf(a: String): Long             = a.length.toLong
   }
 
 }
