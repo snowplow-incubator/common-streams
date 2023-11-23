@@ -23,7 +23,7 @@ object Localstack {
     loggerName: String
   ): Resource[IO, LocalStackContainer] =
     Resource.make {
-      val localstack = new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.2.0"))
+      val localstack = new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.3.2"))
       localstack.addEnv("AWS_DEFAULT_REGION", region.id)
       localstack.addEnv("KINESIS_INITIALIZE_STREAMS", kinesisInitializeStreams)
       localstack.addExposedPort(4566)
