@@ -7,11 +7,13 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
+import cats.FunctorFilter
 import cats.data.{NonEmptyList, Validated, ValidatedNel}
 import cats.implicits._
-import com.snowplowanalytics.iglu.core.{SchemaKey, SelfDescribingData}
+import com.snowplowanalytics.iglu.core.{SchemaCriterion, SchemaKey, SelfDescribingData}
 import com.snowplowanalytics.iglu.schemaddl.parquet.{CastError, Caster, Field, Type}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
+import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts, UnstructEvent}
 import com.snowplowanalytics.snowplow.badrows.{
   BadRow,
   Failure => BadRowFailure,
@@ -76,18 +78,41 @@ object Transform {
     processor: BadRowProcessor,
     caster: Caster[A],
     jsonCaster: Json.Folder[A],
-    event: Event
+    event: Event,
+    entitiesToSkip: List[SchemaCriterion]
   ): Either[BadRow, List[Caster.NamedValue[A]]] =
     forAtomic(caster, event).toEither
       .map { atomic =>
-        val entities = event.contexts.toShreddedJson ++ event.derived_contexts.toShreddedJson ++ event.unstruct_event.toShreddedJson.toMap
-        atomic ::: entities.toList.map { case (key, json) =>
+        atomic ::: extractEntities(event, entitiesToSkip).iterator.map { case (key, json) =>
           Caster.NamedValue(key, json.foldWith(jsonCaster))
-        }
+        }.toList
       }
       .leftMap { nel =>
         BadRow.LoaderIgluError(processor, BadRowFailure.LoaderIgluErrors(nel), BadPayload.LoaderPayload(event))
       }
+
+  private def extractEntities(event: Event, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
+    extractFromContexts(event.contexts, entitiesToSkip) ++
+      extractFromContexts(event.derived_contexts, entitiesToSkip) ++
+      extractFromUnstruct(event.unstruct_event, entitiesToSkip)
+
+  private def extractFromContexts(contexts: Contexts, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
+    Contexts(filterOutEntities(contexts.data, entitiesToSkip)).toShreddedJson
+
+  private def extractFromUnstruct(unstruct: UnstructEvent, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
+    UnstructEvent(filterOutEntities(unstruct.data, entitiesToSkip)).toShreddedJson.toMap
+
+  private def filterOutEntities[Entities[_]: FunctorFilter](
+    entities: Entities[SelfDescribingData[Json]],
+    entitiesToSkip: List[SchemaCriterion]
+  ): Entities[SelfDescribingData[Json]] =
+    if (entitiesToSkip.nonEmpty) {
+      entities.filterNot { entity =>
+        entitiesToSkip.exists(_.matches(entity.schema))
+      }
+    } else {
+      entities
+    }
 
   private def failForResolverErrors(
     processor: BadRowProcessor,

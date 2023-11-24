@@ -35,7 +35,7 @@ class TransformSpec extends Specification {
   def e1 = {
     val event = Event.minimal(testEventId, testTimestamp, "0.0.0", "0.0.0")
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = List(
       NamedValue("event_id", Json.fromString(testEventId.toString)),
@@ -64,7 +64,7 @@ class TransformSpec extends Specification {
         tr_total            = Some(12.34)
       )
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = List(
       NamedValue("app_id", Json.fromString("myapp")),
@@ -91,7 +91,7 @@ class TransformSpec extends Specification {
         tr_total = Some(12.3456) // Too many decimal points
       )
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     result must beLeft
   }
@@ -114,7 +114,7 @@ class TransformSpec extends Specification {
       .minimal(testEventId, testTimestamp, "0.0.0", "0.0.0")
       .copy(unstruct_event = SnowplowEvent.UnstructEvent(Some(sdj)))
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = NamedValue("unstruct_event_com_example_my_schema_7", data)
 
@@ -149,7 +149,7 @@ class TransformSpec extends Specification {
       .minimal(testEventId, testTimestamp, "0.0.0", "0.0.0")
       .copy(contexts = contexts)
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = List(
       NamedValue("contexts_com_example_my_schema_7", Json.fromValues(List(data1))),
@@ -191,7 +191,7 @@ class TransformSpec extends Specification {
       .minimal(testEventId, testTimestamp, "0.0.0", "0.0.0")
       .copy(contexts = contexts)
 
-    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event)
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = NamedValue("contexts_com_example_my_schema_7", Json.fromValues(List(data1, data2)))
 
@@ -206,6 +206,7 @@ object TransformSpec {
 
   val testEventId   = UUID.randomUUID
   val testTimestamp = Instant.now
+  val schemasToSkip = List.empty
 
   val badProcessor = BadRowProcessor("snowflake-loader", "0.0.0")
 
