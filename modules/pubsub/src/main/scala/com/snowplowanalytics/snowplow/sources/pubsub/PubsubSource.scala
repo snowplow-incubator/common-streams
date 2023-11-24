@@ -8,7 +8,7 @@
 package com.snowplowanalytics.snowplow.sources.pubsub
 
 import cats.Monad
-import cats.effect.{Async, Sync}
+import cats.effect.{Async, Resource, Sync}
 import cats.effect.implicits._
 import cats.effect.kernel.{Deferred, DeferredSink, DeferredSource}
 import cats.effect.std._
@@ -23,9 +23,9 @@ import java.time.Instant
 // pubsub
 import com.google.api.core.ApiService
 import com.google.api.gax.batching.FlowControlSettings
-import com.google.api.gax.core.ExecutorProvider
+import com.google.api.gax.core.FixedExecutorProvider
 import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber}
-import com.google.common.util.concurrent.{ForwardingListeningExecutorService, MoreExecutors}
+import com.google.common.util.concurrent.{ForwardingExecutorService, MoreExecutors}
 import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
@@ -35,7 +35,7 @@ import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEv
 
 import scala.concurrent.duration.FiniteDuration
 
-import java.util.concurrent.{Callable, ScheduledExecutorService, ScheduledFuture, ScheduledThreadPoolExecutor, TimeUnit}
+import java.util.concurrent.{Callable, ExecutorService, Executors, ScheduledExecutorService, ScheduledFuture, TimeUnit}
 
 object PubsubSource {
 
@@ -137,7 +137,7 @@ object PubsubSource {
     val receiver = messageReceiver(config, queue, dispatcher, semaphore, sig)
 
     for {
-      executor <- Stream.bracket(Sync[F].delay(scheduledExecutorService))(s => Sync[F].delay(s.shutdown()))
+      executorService <- Stream.resource(scheduledExecutorService[F](config))
       subscriber <- Stream.eval(Sync[F].delay {
                       Subscriber
                         .newBuilder(name, receiver)
@@ -145,12 +145,8 @@ object PubsubSource {
                         .setMaxDurationPerAckExtension(convertDuration(config.maxDurationPerAckExtension))
                         .setMinDurationPerAckExtension(convertDuration(config.minDurationPerAckExtension))
                         .setParallelPullCount(config.parallelPullCount)
-                        .setExecutorProvider {
-                          new ExecutorProvider {
-                            def shouldAutoClose: Boolean              = true
-                            def getExecutor: ScheduledExecutorService = executor
-                          }
-                        }
+                        .setExecutorProvider(FixedExecutorProvider.create(executorService))
+                        .setSystemExecutorProvider(FixedExecutorProvider.create(executorService))
                         .setFlowControlSettings {
                           // Switch off any flow control, because we handle it ourselves with the semaphore
                           FlowControlSettings.getDefaultInstance
@@ -213,40 +209,68 @@ object PubsubSource {
       }
     }
 
-  private def scheduledExecutorService: ScheduledExecutorService = new ForwardingListeningExecutorService with ScheduledExecutorService {
-    val delegate       = MoreExecutors.newDirectExecutorService
-    lazy val scheduler = new ScheduledThreadPoolExecutor(1) // I think this scheduler is never used, but I implement it here for safety
-    override def schedule[V](
-      callable: Callable[V],
-      delay: Long,
-      unit: TimeUnit
-    ): ScheduledFuture[V] =
-      scheduler.schedule(callable, delay, unit)
-    override def schedule(
-      runnable: Runnable,
-      delay: Long,
-      unit: TimeUnit
-    ): ScheduledFuture[_] =
-      scheduler.schedule(runnable, delay, unit)
-    override def scheduleAtFixedRate(
-      runnable: Runnable,
-      initialDelay: Long,
-      period: Long,
-      unit: TimeUnit
-    ): ScheduledFuture[_] =
-      scheduler.scheduleAtFixedRate(runnable, initialDelay, period, unit)
-    override def scheduleWithFixedDelay(
-      runnable: Runnable,
-      initialDelay: Long,
-      delay: Long,
-      unit: TimeUnit
-    ): ScheduledFuture[_] =
-      scheduler.scheduleWithFixedDelay(runnable, initialDelay, delay, unit)
-    override def shutdown(): Unit = {
-      delegate.shutdown()
-      scheduler.shutdown()
+  private def executorResource[F[_]: Sync, E <: ExecutorService](make: F[E]): Resource[F, E] =
+    Resource.make(make)(es => Sync[F].blocking(es.shutdown()))
+
+  /**
+   * Source operations are backed by two thread pools:
+   *
+   *   - A single thread pool, which is only even used for maintenance tasks like extending ack
+   *     extension periods.
+   *   - A small fixed-sized thread pool on which we deliberately run blocking tasks, like
+   *     attempting to write to the Queue.
+   *
+   * Because of this separation, even when the Queue is full, it cannot block the subscriber's
+   * maintenance tasks.
+   *
+   * Note, we use the same exact same thread pools for the subscriber's `executorProvider` and
+   * `systemExecutorProvider`. This means when the Queue is full then it blocks the subscriber from
+   * fetching more messages from pubsub. We need to do this trick because we have disabled flow
+   * control.
+   */
+  private def scheduledExecutorService[F[_]: Sync](config: PubsubSourceConfig): Resource[F, ScheduledExecutorService] =
+    for {
+      forMaintenance <- executorResource(Sync[F].delay(Executors.newSingleThreadScheduledExecutor))
+      forBlocking <- executorResource(Sync[F].delay(Executors.newFixedThreadPool(config.parallelPullCount)))
+    } yield new ForwardingExecutorService with ScheduledExecutorService {
+
+      /**
+       * Any callable/runnable which is **scheduled** must be a maintenance task, so run it on the
+       * dedicated maintenance pool
+       */
+      override def schedule[V](
+        callable: Callable[V],
+        delay: Long,
+        unit: TimeUnit
+      ): ScheduledFuture[V] =
+        forMaintenance.schedule(callable, delay, unit)
+      override def schedule(
+        runnable: Runnable,
+        delay: Long,
+        unit: TimeUnit
+      ): ScheduledFuture[_] =
+        forMaintenance.schedule(runnable, delay, unit)
+      override def scheduleAtFixedRate(
+        runnable: Runnable,
+        initialDelay: Long,
+        period: Long,
+        unit: TimeUnit
+      ): ScheduledFuture[_] =
+        forMaintenance.scheduleAtFixedRate(runnable, initialDelay, period, unit)
+      override def scheduleWithFixedDelay(
+        runnable: Runnable,
+        initialDelay: Long,
+        delay: Long,
+        unit: TimeUnit
+      ): ScheduledFuture[_] =
+        forMaintenance.scheduleWithFixedDelay(runnable, initialDelay, delay, unit)
+
+      /**
+       * Non-scheduled tasks (e.g. when a message is received), can be run on the fixed-size
+       * blocking pool
+       */
+      override val delegate = forBlocking
     }
-  }
 
   private def convertDuration(d: FiniteDuration): ThreetenDuration =
     ThreetenDuration.ofMillis(d.toMillis)
