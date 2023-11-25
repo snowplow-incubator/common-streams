@@ -13,13 +13,16 @@ import io.circe.config.syntax._
 
 import scala.concurrent.duration.FiniteDuration
 
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
+
 case class PubsubSourceConfig(
   subscription: PubsubSourceConfig.Subscription,
   parallelPullCount: Int,
   bufferMaxBytes: Int,
   maxAckExtensionPeriod: FiniteDuration,
   minDurationPerAckExtension: FiniteDuration,
-  maxDurationPerAckExtension: FiniteDuration
+  maxDurationPerAckExtension: FiniteDuration,
+  gcpUserAgent: GcpUserAgent
 )
 
 object PubsubSourceConfig {

@@ -27,6 +27,7 @@ import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 // snowplow
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
 
@@ -193,6 +194,7 @@ object PubsubSource {
                           // Switch off any flow control, because we handle it ourselves with the semaphore
                           FlowControlSettings.getDefaultInstance
                         }
+                        .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
                         .build
                     })
       _ <- Resource.eval(Sync[F].delay {
