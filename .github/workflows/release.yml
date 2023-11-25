@@ -24,11 +24,11 @@ jobs:
           SONATYPE_USERNAME: ${{ secrets.SONA_USER }}
           SONATYPE_PASSWORD: ${{ secrets.SONA_PASS }}
 
-#  docs:
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: coursier/cache-action@v6
-#
-#      - name: Publish docs
-#        run: sbt "project docs" clean makeSite ghpagesPushSite
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+
+      - name: Publish docs
+        run: sbt "project docs" clean makeSite ghpagesPushSite
