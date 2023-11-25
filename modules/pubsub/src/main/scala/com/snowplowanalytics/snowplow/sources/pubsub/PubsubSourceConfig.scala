@@ -16,7 +16,7 @@ import scala.concurrent.duration.FiniteDuration
 case class PubsubSourceConfig(
   subscription: PubsubSourceConfig.Subscription,
   parallelPullCount: Int,
-  bufferMaxBytes: Long,
+  bufferMaxBytes: Int,
   maxAckExtensionPeriod: FiniteDuration,
   minDurationPerAckExtension: FiniteDuration,
   maxDurationPerAckExtension: FiniteDuration
