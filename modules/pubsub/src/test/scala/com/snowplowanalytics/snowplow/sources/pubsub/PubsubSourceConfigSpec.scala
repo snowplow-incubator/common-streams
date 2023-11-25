@@ -15,6 +15,8 @@ import org.specs2.Specification
 
 import scala.concurrent.duration.DurationLong
 
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
+
 class PubsubSourceConfigSpec extends Specification {
   import PubsubSourceConfigSpec._
 
@@ -29,6 +31,9 @@ class PubsubSourceConfigSpec extends Specification {
     |   "xyz": $${snowplow.defaults.sources.pubsub}
     |   "xyz": {
     |     "subscription": "projects/my-project/subscriptions/my-subscription"
+    |     "gcpUserAgent": {
+    |       "productVersion": "example-version"
+    |     }
     |   }
     |}
     |""".stripMargin
@@ -42,6 +47,7 @@ class PubsubSourceConfigSpec extends Specification {
       maxAckExtensionPeriod      = 1.hour,
       minDurationPerAckExtension = 1.minute,
       maxDurationPerAckExtension = 10.minutes,
+      gcpUserAgent               = GcpUserAgent("Snowplow OSS", "example-version"),
       shutdownTimeout            = 30.seconds
     )
 

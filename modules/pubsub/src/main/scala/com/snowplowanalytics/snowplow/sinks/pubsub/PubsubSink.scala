@@ -21,8 +21,9 @@ import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 import scala.jdk.CollectionConverters._
-
 import java.util.UUID
+
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 
 object PubsubSink {
 
@@ -64,6 +65,7 @@ object PubsubSink {
       Publisher
         .newBuilder(topic)
         .setBatchingSettings(batchSettings.build)
+        .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
         .build
     }
 
