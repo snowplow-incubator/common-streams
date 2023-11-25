@@ -13,6 +13,8 @@ import io.circe.Decoder
 import io.circe.generic.semiauto._
 import org.specs2.Specification
 
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
+
 class PubsubSinkConfigSpec extends Specification {
   import PubsubSinkConfigSpec._
 
@@ -27,6 +29,9 @@ class PubsubSinkConfigSpec extends Specification {
     |   "xyz": $${snowplow.defaults.sinks.pubsub}
     |   "xyz": {
     |     "topic": "projects/my-project/topics/my-topic"
+    |     "gcpUserAgent": {
+    |       "productVersion": "example-version"
+    |     }
     |   }
     |}
     |""".stripMargin
@@ -36,7 +41,8 @@ class PubsubSinkConfigSpec extends Specification {
     val expected = PubsubSinkConfig(
       topic                = PubsubSinkConfig.Topic("my-project", "my-topic"),
       batchSize            = 1000L,
-      requestByteThreshold = 1000000L
+      requestByteThreshold = 1000000L,
+      gcpUserAgent         = GcpUserAgent("Snowplow OSS", "example-version")
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

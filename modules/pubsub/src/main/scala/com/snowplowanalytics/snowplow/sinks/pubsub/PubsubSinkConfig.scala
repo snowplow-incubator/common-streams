@@ -10,10 +10,13 @@ package com.snowplowanalytics.snowplow.sinks.pubsub
 import io.circe.Decoder
 import io.circe.generic.semiauto._
 
+import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
+
 case class PubsubSinkConfig(
   topic: PubsubSinkConfig.Topic,
   batchSize: Long,
-  requestByteThreshold: Long
+  requestByteThreshold: Long,
+  gcpUserAgent: GcpUserAgent
 )
 
 object PubsubSinkConfig {
