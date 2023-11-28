@@ -50,7 +50,7 @@ object PubsubSource {
       def checkpointer: PubSubCheckpointer[F] = pubsubCheckpointer
 
       def stream: Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
-        Stream.emit(pubsubStream(config))
+        pubsubStream(config)
     }
 
   private def pubsubCheckpointer[F[_]: Async]: PubSubCheckpointer[F] = new PubSubCheckpointer[F] {
@@ -114,12 +114,11 @@ object PubsubSource {
     }
   }
 
-  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]] =
+  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
     for {
       control <- Stream.eval(Control.build(config))
       _ <- Stream.resource(runSubscriber(config, control))
-      events <- consumeFromQueue(config, control)
-    } yield events
+    } yield consumeFromQueue(config, control)
 
   private def consumeFromQueue[F[_]: Sync](
     config: PubsubSourceConfig,
@@ -203,17 +202,18 @@ object PubsubSource {
                MoreExecutors.directExecutor // TODO: use the non-blocking executor for errors?
              )
            })
-      _ <- Resource.make(Sync[F].delay(subscriber.startAsync())) { apiService =>
-             for {
-               _ <- Logger[F].info("Stopping the PubSub Subscriber...")
-               _ <- Sync[F].delay(apiService.stopAsync())
-               fiber <- drainQueue(control).start
-               _ <- Logger[F].info("Waiting for the PubSub Subscriber to finish cleanly...")
-               _ <- Sync[F].blocking(apiService.awaitTerminated())
-               _ <- Sync[F].delay(control.phaser.forceTermination())
-               _ <- fiber.join
-             } yield ()
-           }
+      apiService <- Resource.make(Sync[F].delay(subscriber.startAsync())) { apiService =>
+                      for {
+                        _ <- Logger[F].info("Stopping the PubSub Subscriber...")
+                        _ <- Sync[F].delay(apiService.stopAsync())
+                        fiber <- drainQueue(control).start
+                        _ <- Logger[F].info("Waiting for the PubSub Subscriber to finish cleanly...")
+                        _ <- Sync[F].blocking(apiService.awaitTerminated())
+                        _ <- Sync[F].delay(control.phaser.forceTermination())
+                        _ <- fiber.join
+                      } yield ()
+                    }
+      _ <- Resource.eval(Sync[F].blocking(apiService.awaitRunning()))
     } yield ()
 
   private def drainQueue[F[_]: Async](control: Control): F[Unit] =
