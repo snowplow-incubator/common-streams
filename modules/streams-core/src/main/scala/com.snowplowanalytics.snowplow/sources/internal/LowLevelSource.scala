@@ -17,7 +17,7 @@ import fs2.{Pipe, Pull, Stream}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
 
 /**
@@ -76,16 +76,19 @@ private[sources] object LowLevelSource {
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
     for {
       latencyRef <- Ref[F].of(Option.empty[FiniteDuration])
-    } yield sourceAndAckImpl(source, latencyRef)
+      isConnectedRef <- Ref[F].of(false)
+    } yield sourceAndAckImpl(source, latencyRef, isConnectedRef)
 
   private def sourceAndAckImpl[F[_]: Async, C](
     source: LowLevelSource[F, C],
-    latencyRef: LatencyRef[F]
+    latencyRef: LatencyRef[F],
+    isConnectedRef: Ref[F, Boolean]
   ): SourceAndAck[F] = new SourceAndAck[F] {
     def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] = {
       val str = for {
         acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
         s2 <- source.stream
+        _ <- Stream.bracket(isConnectedRef.set(true))(_ => isConnectedRef.set(false))
       } yield {
         val tokenedSources = s2
           .through(monitorLatency(latencyRef))
@@ -105,13 +108,13 @@ private[sources] object LowLevelSource {
       str.flatten
     }
 
-    def processingLatency: F[FiniteDuration] =
-      latencyRef.get.flatMap {
-        case None => Duration.Zero.pure[F]
-        case Some(lastPullTime) =>
-          Async[F].realTime.map { now =>
-            now - lastPullTime
-          }
+    def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus] =
+      (isConnectedRef.get, latencyRef.get, Sync[F].realTime).mapN {
+        case (false, _, _) =>
+          SourceAndAck.Disconnected
+        case (_, Some(lastPullTime), now) if now - lastPullTime > maxAllowedProcessingLatency =>
+          SourceAndAck.LaggingEventProcessor(now - lastPullTime)
+        case _ => SourceAndAck.Healthy
       }
   }
 
