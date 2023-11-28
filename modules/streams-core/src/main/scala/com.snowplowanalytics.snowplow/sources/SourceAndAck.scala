@@ -7,6 +7,8 @@
  */
 package com.snowplowanalytics.snowplow.sources
 
+import cats.Show
+import cats.implicits._
 import fs2.Stream
 import scala.concurrent.duration.FiniteDuration
 
@@ -33,14 +35,46 @@ trait SourceAndAck[F[_]] {
   def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing]
 
   /**
-   * Measurement of how long the EventProcessor has spent processing any pending un-acked events.
+   * Reports on whether the source of events is healthy
    *
-   * Note, unlike our statsd metrics, this measurement does not consider min/max values over a
-   * period of time. It is a snapshot measurement for a single point in time.
+   * @param maxAllowedProcessingLatency
+   *   A maximum allowed value for how long the `EventProcessor` may spend processing any pending
+   *   un-acked events. If this cutoff is exceeded then `isHealthy` returns an unhealthy status.
    *
-   * This measurement is designed to be used as a health probe. If events are getting processed
-   * quickly then latency is low and the probe should report healthy. If any event is "stuck" then
-   * latency is high and the probe should report unhealthy.
+   * Note, unlike our statsd metrics, this latency measurement does not consider min/max values over
+   * a period of time. It is a snapshot measurement for a single point in time.
+   *
+   * If events are getting processed quickly then latency is low and the probe should report
+   * healthy. If any event is "stuck" then latency is high and the probe should report unhealthy.
    */
-  def processingLatency: F[FiniteDuration]
+  def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus]
+}
+
+object SourceAndAck {
+
+  sealed trait HealthStatus
+  case object Healthy extends HealthStatus
+  sealed trait Unhealthy extends HealthStatus
+
+  /**
+   * The health status expected if the source is at a stage of its lifecycle where cannot provide
+   * events
+   *
+   * For Pubsub this could be because the Subscriber is not yet running. For Kafka this could be due
+   * to re-balancing.
+   */
+  case object Disconnected extends Unhealthy
+
+  /**
+   * The health status expected if an event is "stuck" in the EventProcessor
+   *
+   * @param latency
+   *   How long the EventProcessor has spent trying to process the stuck event
+   */
+  case class LaggingEventProcessor(latency: FiniteDuration) extends Unhealthy
+
+  implicit def showUnhealthy: Show[Unhealthy] = Show {
+    case Disconnected                   => "No connection to a source of events"
+    case LaggingEventProcessor(latency) => show"Processing latency is $latency"
+  }
 }
