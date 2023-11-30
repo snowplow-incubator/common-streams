@@ -42,7 +42,7 @@ object Dependencies {
     val badrows      = "2.3.0"
     val igluClient   = "3.1.0"
     val tracker      = "2.0.0"
-    val analyticsSdk = "3.1.0"
+    val analyticsSdk = "3.2.0-M2"
 
     // Transitive overrides
     val snappy = "1.1.10.2"
