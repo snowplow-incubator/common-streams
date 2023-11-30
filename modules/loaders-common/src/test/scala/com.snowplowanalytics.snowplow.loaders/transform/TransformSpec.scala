@@ -152,8 +152,26 @@ class TransformSpec extends Specification {
     val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
     val expected = List(
-      NamedValue("contexts_com_example_my_schema_7", Json.fromValues(List(data1))),
-      NamedValue("contexts_com_example_my_schema_8", Json.fromValues(List(data2)))
+      NamedValue(
+        name = "contexts_com_example_my_schema_7",
+        value = json"""
+              [{
+                "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-1",
+                "my_string": "abc",
+                "my_int":     42
+              }]
+              """
+      ),
+      NamedValue(
+        name = "contexts_com_example_my_schema_8",
+        value = json"""
+              [{
+                "_schema_version" : "iglu:com.example/mySchema/jsonschema/8-0-1",
+                "my_string": "xyz",
+                "my_int":     123 
+              }]
+              """
+      )
     )
 
     result must beRight { namedValues: List[NamedValue[Json]] =>
@@ -193,7 +211,21 @@ class TransformSpec extends Specification {
 
     val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
 
-    val expected = NamedValue("contexts_com_example_my_schema_7", Json.fromValues(List(data1, data2)))
+    val expected = NamedValue(
+      name = "contexts_com_example_my_schema_7",
+      value = json"""
+            [{
+              "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-1",
+              "my_string": "abc",
+              "my_int":     42
+            },
+            {
+              "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-2",
+              "my_string": "xyz",
+              "my_int":     123 
+            }]
+            """
+    )
 
     result must beRight { namedValues: List[NamedValue[Json]] =>
       namedValues must contain(expected).exactly(1.times)

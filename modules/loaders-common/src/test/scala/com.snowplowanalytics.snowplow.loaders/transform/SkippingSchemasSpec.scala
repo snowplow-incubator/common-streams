@@ -45,8 +45,14 @@ class SkippingSchemasSpec extends Specification {
       shouldNotExist = List.empty,
       shouldExist = List(
         NamedValue(name = "unstruct_event_com_example_my_schema_1", value = json"""{"field": "ue1"}"""),
-        NamedValue(name = "contexts_com_example_my_schema_2", value       = json"""[{"field": "c1"}]"""),
-        NamedValue(name = "contexts_com_example_my_schema_3", value       = json"""[{"field": "dc1"}]""")
+        NamedValue(
+          name  = "contexts_com_example_my_schema_2",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-0-0", "field": "c1"}]"""
+        ),
+        NamedValue(
+          name  = "contexts_com_example_my_schema_3",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/3-0-0", "field": "dc1"}]"""
+        )
       )
     )
   }
@@ -64,8 +70,14 @@ class SkippingSchemasSpec extends Specification {
       shouldNotExist = List.empty,
       shouldExist = List(
         NamedValue(name = "unstruct_event_com_example_my_schema_1", value = json"""{"field": "ue1"}"""),
-        NamedValue(name = "contexts_com_example_my_schema_2", value       = json"""[{"field": "c1"}]"""),
-        NamedValue(name = "contexts_com_example_my_schema_3", value       = json"""[{"field": "dc1"}]""")
+        NamedValue(
+          name  = "contexts_com_example_my_schema_2",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-0-0", "field": "c1"}]"""
+        ),
+        NamedValue(
+          name  = "contexts_com_example_my_schema_3",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/3-0-0", "field": "dc1"}]"""
+        )
       )
     )
   }
@@ -103,8 +115,14 @@ class SkippingSchemasSpec extends Specification {
         "unstruct_event_com_example_my_schema_1"
       ),
       shouldExist = List(
-        NamedValue(name = "contexts_com_example_my_schema_2", value = json"""[{"field": "c1"}]"""),
-        NamedValue(name = "contexts_com_example_my_schema_3", value = json"""[{"field": "dc1"}]""")
+        NamedValue(
+          name  = "contexts_com_example_my_schema_2",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-0-0", "field": "c1"}]"""
+        ),
+        NamedValue(
+          name  = "contexts_com_example_my_schema_3",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/3-0-0", "field": "dc1"}]"""
+        )
       )
     )
   }
@@ -127,8 +145,14 @@ class SkippingSchemasSpec extends Specification {
       ),
       shouldExist = List(
         // There is still '_2' column because 2-0-0 is skipped, but 2-1-0 with c2 value is not
-        NamedValue(name = "contexts_com_example_my_schema_2", value = json"""[{"field": "c2"}]"""),
-        NamedValue(name = "contexts_com_example_my_schema_3", value = json"""[{"field": "dc1"}]""")
+        NamedValue(
+          name  = "contexts_com_example_my_schema_2",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-1-0", "field": "c2"}]"""
+        ),
+        NamedValue(
+          name  = "contexts_com_example_my_schema_3",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/3-0-0", "field": "dc1"}]"""
+        )
       )
     )
   }
@@ -151,7 +175,11 @@ class SkippingSchemasSpec extends Specification {
       ),
       shouldExist = List(
         NamedValue(name = "unstruct_event_com_example_my_schema_1", value = json"""{"field": "ue1"}"""),
-        NamedValue(name = "contexts_com_example_my_schema_2", value       = json"""[{"field": "c1"}, {"field": "c2"}]""")
+        NamedValue(
+          name = "contexts_com_example_my_schema_2",
+          value = json"""[{"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-0-0", "field": "c1"}, 
+                          {"_schema_version" : "iglu:com.example/mySchema/jsonschema/2-1-0", "field": "c2"}]"""
+        )
       )
     )
   }
