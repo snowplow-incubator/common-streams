@@ -205,7 +205,7 @@ object PubsubSource {
                         _ <- Sync[F].delay(apiService.stopAsync())
                         fiber <- drainQueue(control).start
                         _ <- Logger[F].info("Waiting for the PubSub Subscriber to finish cleanly...")
-                        _ <- Sync[F].blocking(apiService.awaitTerminated())
+                        _ <- Sync[F].blocking(apiService.awaitTerminated(config.shutdownTimeout.toMillis, TimeUnit.MILLISECONDS))
                         _ <- Sync[F].delay(control.phaser.forceTermination())
                         _ <- fiber.join
                       } yield ()
