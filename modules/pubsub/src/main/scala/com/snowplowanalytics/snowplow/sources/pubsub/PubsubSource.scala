@@ -33,7 +33,17 @@ import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEv
 
 import scala.concurrent.duration.FiniteDuration
 
-import java.util.concurrent.{Callable, ExecutorService, Executors, Phaser, ScheduledExecutorService, ScheduledFuture, Semaphore, TimeUnit}
+import java.util.concurrent.{
+  Callable,
+  ExecutorService,
+  Executors,
+  Phaser,
+  ScheduledExecutorService,
+  ScheduledFuture,
+  Semaphore,
+  TimeUnit,
+  TimeoutException
+}
 import java.util.concurrent.atomic.AtomicReference
 
 object PubsubSource {
@@ -205,7 +215,9 @@ object PubsubSource {
                         _ <- Sync[F].delay(apiService.stopAsync())
                         fiber <- drainQueue(control).start
                         _ <- Logger[F].info("Waiting for the PubSub Subscriber to finish cleanly...")
-                        _ <- Sync[F].blocking(apiService.awaitTerminated())
+                        _ <- Sync[F]
+                               .blocking(apiService.awaitTerminated(config.shutdownTimeout.toMillis, TimeUnit.MILLISECONDS))
+                               .attemptNarrow[TimeoutException]
                         _ <- Sync[F].delay(control.phaser.forceTermination())
                         _ <- fiber.join
                       } yield ()
