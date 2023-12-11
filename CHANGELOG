@@ -1,3 +1,17 @@
+Version 0.2.0 (2023-12-11)
+--------------------------
+Explicitly shut down thread pools for pubsub (#42)
+Add health status reporter to the Source interface (#40)
+Set user-agent header in PubSub publisher and subscriber (#37)
+Reduce thread context switching in pubsub source (#36)
+Upgrade analytics-sdk to 3.2.0 (#41)
+Skip schemas for unstructured transformation (#39)
+BatchUp should be compatible with ListOfList (#32)
+Use ListOfList as primary data structure for streaming apps (#31)
+Bump badrows to 2.3.0 (#30)
+pubsub sink: wrap bytes instead of copying (#28)
+Bump localstack to 2.3.2 (#33)
+
 Version 0.1.0 (2023-11-16)
 --------------------------
 Initial release
