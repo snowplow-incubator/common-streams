@@ -43,8 +43,10 @@ object KinesisSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Parallel: Async](config: KinesisSourceConfig): F[SourceAndAck[F]] =
-    LowLevelSource.toSourceAndAck(lowLevel(config))
+  def build[F[_]: Parallel: Async](config: KinesisSourceConfig): Resource[F, SourceAndAck[F]] =
+    kinesisResources(config).evalMap { case (settings, kinesis) =>
+      LowLevelSource.toSourceAndAck(lowLevel(settings, kinesis))
+    }
 
   private type KinesisCheckpointer[F[_]] = Checkpointer[F, Map[String, KinesisMetadata[F]]]
 
@@ -61,12 +63,15 @@ object KinesisSource {
     ack: F[Unit]
   )
 
-  private def lowLevel[F[_]: Parallel: Async](config: KinesisSourceConfig): LowLevelSource[F, Map[String, KinesisMetadata[F]]] =
+  private def lowLevel[F[_]: Parallel: Async](
+    settings: KinesisConsumerSettings,
+    kinesis: Kinesis[F]
+  ): LowLevelSource[F, Map[String, KinesisMetadata[F]]] =
     new LowLevelSource[F, Map[String, KinesisMetadata[F]]] {
       def checkpointer: KinesisCheckpointer[F] = kinesisCheckpointer[F]
 
       def stream: Stream[F, Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]]] =
-        Stream.emit(kinesisStream(config))
+        Stream.emit(kinesisStream(settings, kinesis))
     }
 
   private implicit def metadataSemigroup[F[_]]: Semigroup[KinesisMetadata[F]] = new Semigroup[KinesisMetadata[F]] {
@@ -112,31 +117,31 @@ object KinesisSource {
     def nack(c: Map[String, KinesisMetadata[F]]): F[Unit] = Applicative[F].unit
   }
 
-  private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
-    val resources =
-      for {
-        region <- Resource.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
-        consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
-                              KinesisConsumerSettings(
-                                config.streamName,
-                                config.appName,
-                                region,
-                                bufferSize = config.bufferSize
-                              )
+  private def kinesisResources[F[_]: Async](config: KinesisSourceConfig): Resource[F, (KinesisConsumerSettings, Kinesis[F])] =
+    for {
+      region <- Resource.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
+      consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
+                            KinesisConsumerSettings(
+                              config.streamName,
+                              config.appName,
+                              region,
+                              bufferSize = config.bufferSize
                             )
-        kinesisClient <- mkKinesisClient[F](region, config.customEndpoint)
-        dynamoClient <- mkDynamoDbClient[F](region, config.dynamodbCustomEndpoint)
-        cloudWatchClient <- mkCloudWatchClient[F](region, config.cloudwatchCustomEndpoint)
-        kinesis <- Resource.pure[F, Kinesis[F]](
-                     Kinesis.create(scheduler(kinesisClient, dynamoClient, cloudWatchClient, config, _))
-                   )
-      } yield (consumerSettings, kinesis)
+                          )
+      kinesisClient <- mkKinesisClient[F](region, config.customEndpoint)
+      dynamoClient <- mkDynamoDbClient[F](region, config.dynamodbCustomEndpoint)
+      cloudWatchClient <- mkCloudWatchClient[F](region, config.cloudwatchCustomEndpoint)
+      kinesis <- Resource.pure[F, Kinesis[F]](
+                   Kinesis.create(scheduler(kinesisClient, dynamoClient, cloudWatchClient, config, _))
+                 )
+    } yield (consumerSettings, kinesis)
 
-    Stream
-      .resource(resources)
-      .flatMap { case (settings, kinesis) =>
-        kinesis.readFromKinesisStream(settings)
-      }
+  private def kinesisStream[F[_]: Async](
+    settings: KinesisConsumerSettings,
+    kinesis: Kinesis[F]
+  ): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] =
+    kinesis
+      .readFromKinesisStream(settings)
       .chunks
       .filter(_.nonEmpty)
       .map { chunk =>
@@ -149,7 +154,6 @@ object KinesisSource {
         val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).min
         LowLevelEvents(chunk.map(_.record.data()), ack, Some(earliestTstamp))
       }
-  }
 
   private def initialPositionOf(config: KinesisSourceConfig.InitialPosition): InitialPositionInStreamExtended =
     config match {

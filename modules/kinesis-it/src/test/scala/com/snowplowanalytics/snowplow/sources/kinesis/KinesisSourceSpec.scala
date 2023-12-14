@@ -18,36 +18,33 @@ import org.testcontainers.containers.localstack.LocalStackContainer
 
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
-
-import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
+import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, SourceAndAck}
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
 import com.snowplowanalytics.snowplow.it.kinesis._
 
 import java.time.Instant
-
 import Utils._
 
-class KinesisSourceSpec
-    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)]
-    with SpecificationLike {
+class KinesisSourceSpec extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, SourceAndAck[IO])] with SpecificationLike {
   import KinesisSourceSpec._
 
   override val Timeout: FiniteDuration = 3.minutes
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
+  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, SourceAndAck[IO])] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
-    } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_))
+      sourceAndAck <- KinesisSource.build[IO](getKinesisSourceConfig(localstack.getEndpoint)(testStream1Name))
+    } yield (localstack, kinesisClient, sourceAndAck)
 
   override def is = s2"""
   KinesisSourceSpec should
     read from input stream $e1
   """
 
-  def e1 = withResource { case (_, kinesisClient, getKinesisSourceConfig) =>
+  def e1 = withResource { case (_, kinesisClient, sourceAndAck) =>
     val testPayload = "test-payload"
 
     for {
@@ -56,9 +53,7 @@ class KinesisSourceSpec
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
       t2 <- IO.realTimeInstant
       processingConfig = new EventProcessingConfig(NoWindowing)
-      kinesisConfig    = getKinesisSourceConfig(testStream1Name)
-      sourceAndAck <- KinesisSource.build[IO](kinesisConfig)
-      stream = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
+      stream           = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
       fiber <- stream.compile.drain.start
       _ <- IO.sleep(2.minutes)
       processed <- refProcessed.get
