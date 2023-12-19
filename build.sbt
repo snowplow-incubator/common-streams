@@ -13,11 +13,11 @@ lazy val root = project
   .aggregate(
     streams,
     kinesis,
-    kinesisIT,
     kafka,
     pubsub,
     runtimeCommon,
-    loadersCommon
+    loadersCommon,
+    IT
   )
 
 lazy val streams: Project = project
@@ -51,16 +51,17 @@ lazy val kinesis: Project = project
   .settings(libraryDependencies ++= Dependencies.kinesisDependencies)
   .dependsOn(streams)
 
-lazy val kinesisIT: Project = project
+lazy val IT: Project = project
   .settings(
-    name := "kinesis-it"
+    name := "it"
   )
-  .withId("kinesis-it")
-  .in(file("modules/kinesis-it"))
+  .withId("it")
+  .in(file("modules/it"))
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
   .settings(BuildSettings.mimaSettings)
   .dependsOn(kinesis)
+  .dependsOn(runtimeCommon)
   .settings(
     publish / skip := true,
     publishLocal / skip := true,
