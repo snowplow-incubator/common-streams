@@ -139,6 +139,7 @@ object Dependencies {
   )
 
   val kinesisItDependencies = Seq(
+    circeGeneric        % Test,
     catsEffectTestingIt % Test,
     catsEffectSpecs2It  % Test,
     localstackIt        % Test,
