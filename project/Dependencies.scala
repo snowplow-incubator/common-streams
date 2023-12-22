@@ -51,6 +51,7 @@ object Dependencies {
     val specs2           = "4.20.0"
     val catsEffectSpecs2 = "1.5.0"
     val localstack       = "1.19.0"
+    val eventGen         = "0.7.0"
   }
 
   val catsEffectKernel  = "org.typelevel"          %% "cats-effect-kernel"      % V.catsEffect
@@ -105,9 +106,10 @@ object Dependencies {
   val analyticsSdk = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.analyticsSdk
 
   // tests
-  val specs2            = "org.specs2"    %% "specs2-core"                % V.specs2           % Test
-  val catsEffectTestkit = "org.typelevel" %% "cats-effect-testkit"        % V.catsEffect       % Test
-  val catsEffectSpecs2  = "org.typelevel" %% "cats-effect-testing-specs2" % V.catsEffectSpecs2 % Test
+  val specs2            = "org.specs2"            %% "specs2-core"                   % V.specs2           % Test
+  val catsEffectTestkit = "org.typelevel"         %% "cats-effect-testkit"           % V.catsEffect       % Test
+  val catsEffectSpecs2  = "org.typelevel"         %% "cats-effect-testing-specs2"    % V.catsEffectSpecs2 % Test
+  val eventGen          = "com.snowplowanalytics" %% "snowplow-event-generator-core" % V.eventGen         % Test
 
   val streamsDependencies = Seq(
     cats,
@@ -189,6 +191,7 @@ object Dependencies {
     analyticsSdk,
     specs2,
     catsEffectSpecs2,
-    slf4jSimple % Test
+    slf4jSimple % Test,
+    eventGen
   )
 }

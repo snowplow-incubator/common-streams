@@ -47,7 +47,9 @@ object BuildSettings {
     ThisBuild / autoAPIMappings := true,
     ThisBuild / dynverVTagPrefix := false, // Otherwise git tags required to have v-prefix
     ThisBuild / dynverSeparator := "-", // to be compatible with docker
-
+    resolvers ++= Seq(
+      ("Snowplow Analytics Maven repo" at "http://maven.snplow.com/releases/").withAllowInsecureProtocol(true)
+    ),
     Compile / resourceGenerators += Def.task {
       val license = (Compile / resourceManaged).value / "META-INF" / "LICENSE"
       IO.copyFile(file("LICENSE.md"), license)
