@@ -1,0 +1,9 @@
+{
+  "field1": "value1",
+  "field2": 10,
+  "field3": true,
+  "field4":
+    "field41": "value41",
+    "field42": "value42"
+  }
+}

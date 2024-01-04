@@ -1,0 +1,13 @@
+{
+  "field1": ${subfield.a},
+  "field2": 10,
+  "field3": true,
+  "field4": {
+    "field41": ${subfield.b},
+    "field42": "value42"
+  }
+  "subfield": {
+    "a": "sub1"
+    "b": "sub2"
+  }
+}
