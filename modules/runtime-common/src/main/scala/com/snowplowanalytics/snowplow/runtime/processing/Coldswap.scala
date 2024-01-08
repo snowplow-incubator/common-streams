@@ -33,15 +33,18 @@ final class Coldswap[F[_]: Sync, A] private (
    * available for the duration of the `Resource.use` block.
    */
   def opened: Resource[F, A] =
-    trackHeldPermits(sem).evalMap { permitManager =>
-      (permitManager.acquireN(1L) *> ref.get).flatMap {
+    fiberLocalPermitManager(sem).evalMap { permitManager =>
+      // Must acquire a permit before attempting to access the resource.  Avoids conflicts with other concurrent fibers opening/closing the resource.
+      (permitManager.acquireOnePermit *> ref.get).flatMap {
         case Opened(a, _) => Sync[F].pure(a)
         case Closed =>
           for {
-            _ <- permitManager.releaseN(1L)
-            _ <- permitManager.acquireN(Long.MaxValue)
-            a <- doOpen(ref, resource)
-            _ <- permitManager.releaseN(Long.MaxValue - 1)
+            // Must acquire all permits before opening a new resource.  Avoids conflicts with other concurrent fibers that want to use the resource.
+            _ <- permitManager.stepFromOneToAllPermits
+            // We have all permits.  Safe to open the resource; this will not conflict with another fiber.
+            a <- doOpen
+            // Release all-but-one permits, to unblock other concurrent fibers from calling `coldswap.opened.use` in parallel.
+            _ <- permitManager.stepFromAllToOnePermit
           } yield a
       }
     }
@@ -51,31 +54,50 @@ final class Coldswap[F[_]: Sync, A] private (
    * duration of the `Resource.use` block.
    */
   def closed: Resource[F, Unit] =
-    trackHeldPermits(sem).evalMap { permitManager =>
-      (permitManager.acquireN(1L) *> ref.get).flatMap {
+    fiberLocalPermitManager(sem).evalMap { permitManager =>
+      // Must acquire a permit before inspecting the current state.  Avoids conflicts with other concurrent fibers opening/closing the resource.
+      (permitManager.acquireOnePermit *> ref.get).flatMap {
         case Closed => Sync[F].unit
         case Opened(_, _) =>
           for {
-            _ <- permitManager.releaseN(1L)
-            _ <- permitManager.acquireN(Long.MaxValue)
-            _ <- doClose(ref)
-            _ <- permitManager.releaseN(Long.MaxValue - 1)
+            // Must acquire all permits before opening a new resource.  Avoids open/close conflicts with other concurrent fibers.
+            _ <- permitManager.stepFromOneToAllPermits
+            // We have all permits.  Safe to close the resource; this will not conflict with another fiber.
+            _ <- doClose
+            // Release all-but-one permits, to unblock other concurrent fibers from calling `coldswap.closed.use` in parallel.
+            _ <- permitManager.stepFromAllToOnePermit
           } yield ()
       }
     }
 
-  private def doClose(ref: Ref[F, State[F, A]]): F[Unit] =
+  /**
+   * Closes the currently held resource, if open.
+   *
+   * This must strictly only be called after acquiring ALL permits from the semaphore. Otherwise, we
+   * would close the resource while someone is still using it.
+   */
+  private def doClose: F[Unit] =
     ref.get.flatMap {
-      case Closed => Sync[F].unit
+      case Closed =>
+        // This is possible if another fiber called `doClose` while we were waiting for this fiber to acquire all the permits
+        Sync[F].unit
       case Opened(_, close) =>
         Sync[F].uncancelable { _ =>
           close *> ref.set(Closed)
         }
     }
 
-  private def doOpen(ref: Ref[F, State[F, A]], resource: Resource[F, A]): F[A] =
+  /**
+   * Opens a new resource if currently closed.
+   *
+   * This must strictly only be called after acquiring ALL permits from the semaphore. Otherwise, we
+   * would open the resource while someone still requires it to be closed.
+   */
+  private def doOpen: F[A] =
     ref.get.flatMap {
-      case Opened(a, _) => Sync[F].pure(a)
+      case Opened(a, _) =>
+        // This is possible if another fiber called `doOpen` while we were waiting for this fiber to acquire all the permits
+        Sync[F].pure(a)
       case Closed =>
         Sync[F].uncancelable { poll =>
           for {
@@ -101,24 +123,80 @@ object Coldswap {
       _ <- Resource.onFinalize(coldswap.closed.use_)
     } yield coldswap
 
+  private sealed trait PermitState
+
+  /** State of a Fiber that has no permits */
+  private case object HasNoPermits extends PermitState
+
+  /**
+   * State of a Fiber that has acquired one permit from the global Semaphore
+   *
+   * We must be in this State when Resource is being used by the calling app. It blocks another
+   * fiber from opening/closing the Resource while it is still being used.
+   */
+  private case object HasOnePermit extends PermitState
+
+  /**
+   * State of a Fiber that has acquired all permits from the global Semaphore
+   *
+   * We must be in this State when opening/closing the Resource. It prevents another fiber from
+   * accessing the Resource when it is not ready for use.
+   */
+  private case object HasAllPermits extends PermitState
+
+  private val NumPermitsInExistence = Long.MaxValue
+
   /**
    * Pairs a Semaphore with a Ref which counts how many permits we have locally borrowed from the
    * Semaphore
+   *
+   * This is "local" in a sense that it belongs to a local fiber. It cannot be used for concurrent
+   * access by multiple fibers.
    */
-  private class PermitManager[F[_]: Sync](sem: Semaphore[F], held: Ref[F, Long]) {
-    def acquireN(count: Long): F[Unit] =
+  private class FiberLocalPermitManager[F[_]: Sync](sem: Semaphore[F], state: Ref[F, PermitState]) {
+
+    /**
+     * Acquires one permit from the Semaphore and saves the state
+     *
+     * This MUST be called only when the local fiber currently has no permits.
+     */
+    def acquireOnePermit: F[Unit] =
       Sync[F].uncancelable { poll =>
         for {
-          _ <- poll(sem.acquireN(count))
-          _ <- held.update(_ + count)
+          _ <- poll(sem.acquire)
+          _ <- state.set(HasOnePermit)
         } yield ()
       }
 
-    def releaseN(count: Long): F[Unit] =
+    /**
+     * Acquires all permits from the Semaphore and saves the state
+     *
+     * This MUST be called only when the local fiber currently has **one** permit.
+     *
+     * The implementation first releases the currently held permit before trying to acquire all
+     * other permits. Otherwise two concurrent fibers might reach a deadlock both trying to step
+     * from 1 to all permits.
+     */
+    def stepFromOneToAllPermits: F[Unit] =
+      Sync[F].uncancelable { poll =>
+        for {
+          _ <- sem.release
+          _ <- state.set(HasNoPermits)
+          _ <- poll(sem.acquireN(NumPermitsInExistence))
+          _ <- state.set(HasAllPermits)
+        } yield ()
+      }
+
+    /**
+     * Releases all-but-one permits from the Semaphore and saves the state
+     *
+     * This MUST be called only when the local fiber has **all** permits.
+     */
+    def stepFromAllToOnePermit: F[Unit] =
       Sync[F].uncancelable { _ =>
         for {
-          _ <- sem.releaseN(count)
-          _ <- held.update(_ - count)
+          _ <- sem.releaseN(NumPermitsInExistence - 1)
+          _ <- state.set(HasOnePermit)
         } yield ()
       }
   }
@@ -126,19 +204,20 @@ object Coldswap {
   /**
    * Counts and cleans up locally held permits from a Semaphore
    *
-   * The returned PermitManager must be used responsibly to acquire and release permits from the
-   * semaphore. Any held permits will be released when this Resource is finalized.
+   * The returned FiberLocalPermitManager must be used responsibly to acquire and release permits
+   * from the semaphore. Any held permits will be released when this Resource is finalized.
    */
-  private def trackHeldPermits[F[_]: Sync](sem: Semaphore[F]): Resource[F, PermitManager[F]] =
-    Resource.eval(Ref[F].of(0L)).flatMap { ref =>
+  private def fiberLocalPermitManager[F[_]: Sync](sem: Semaphore[F]): Resource[F, FiberLocalPermitManager[F]] =
+    Resource.eval(Ref[F].of[PermitState](HasNoPermits)).flatMap { ref =>
       val finalizer = Resource.onFinalize {
-        for {
-          count <- ref.get
-          _ <- sem.releaseN(count)
-        } yield ()
+        ref.get.flatMap {
+          case HasNoPermits  => Sync[F].unit
+          case HasOnePermit  => sem.release
+          case HasAllPermits => sem.releaseN(NumPermitsInExistence)
+        }
       }
 
-      Resource.pure(new PermitManager(sem, ref)) <* finalizer
+      Resource.pure(new FiberLocalPermitManager(sem, ref)) <* finalizer
     }
 
 }
