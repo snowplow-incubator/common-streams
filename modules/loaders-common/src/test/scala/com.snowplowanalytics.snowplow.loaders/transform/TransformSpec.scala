@@ -178,7 +178,7 @@ class TransformSpec extends Specification {
         name = "contexts_com_example_my_schema_7",
         value = json"""
               [{
-                "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-1",
+                "_schema_version" : "7-0-1",
                 "my_string": "abc",
                 "my_int":     42
               }]
@@ -188,7 +188,7 @@ class TransformSpec extends Specification {
         name = "contexts_com_example_my_schema_8",
         value = json"""
               [{
-                "_schema_version" : "iglu:com.example/mySchema/jsonschema/8-0-1",
+                "_schema_version" : "8-0-1",
                 "my_string": "xyz",
                 "my_int":     123 
               }]
@@ -237,12 +237,12 @@ class TransformSpec extends Specification {
       name = "contexts_com_example_my_schema_7",
       value = json"""
             [{
-              "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-1",
+              "_schema_version" : "7-0-1",
               "my_string": "abc",
               "my_int":     42
             },
             {
-              "_schema_version" : "iglu:com.example/mySchema/jsonschema/7-0-2",
+              "_schema_version" : "7-0-2",
               "my_string": "xyz",
               "my_int":     123 
             }]
