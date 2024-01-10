@@ -1,3 +1,12 @@
+Version 0.3.0 (2024-01-15)
+--------------------------
+Add StatsD metrics testing (#47)
+Use short `_schema_version` field from analytics-sdk (#55)
+Add coldswap class to manage concurrent resource access (#53)
+Unit tests for ConfigParser (#51)
+Add badrows serializer checking max size (#49)
+Extend coverage of Transform.transformEventUnstructured unit tests (#50)
+
 Version 0.2.1 (2023-12-12)
 --------------------------
 Reinstate shutdown timeout on pubsub source (#44)
