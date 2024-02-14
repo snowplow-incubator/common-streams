@@ -46,7 +46,10 @@ class KafkaSourceConfigSpec extends Specification {
       consumerConf = Map(
         "group.id" -> "my-consumer-group",
         "allow.auto.create.topics" -> "false",
-        "auto.offset.reset" -> "latest"
+        "auto.offset.reset" -> "latest",
+        "security.protocol" -> "SASL_SSL",
+        "sasl.mechanism" -> "OAUTHBEARER",
+        "sasl.jaas.config" -> "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"
       )
     )
 

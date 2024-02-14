@@ -153,6 +153,7 @@ object Dependencies {
     fs2Kafka,
     circeConfig,
     circeGeneric,
+    azureIdentity,
     snappy,
     specs2
   )

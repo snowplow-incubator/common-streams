@@ -16,6 +16,8 @@ import fs2.Stream
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
+import scala.reflect._
+
 import java.nio.ByteBuffer
 import java.time.Instant
 
@@ -26,20 +28,27 @@ import org.apache.kafka.common.TopicPartition
 // snowplow
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
+import com.snowplowanalytics.snowplow.azure.AzureAuthenticationCallbackHandler
 
 object KafkaSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Async](config: KafkaSourceConfig): F[SourceAndAck[F]] =
-    LowLevelSource.toSourceAndAck(lowLevel(config))
+  def build[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
+    config: KafkaSourceConfig,
+    authHandlerClass: ClassTag[T]
+  ): F[SourceAndAck[F]] =
+    LowLevelSource.toSourceAndAck(lowLevel(config, authHandlerClass))
 
-  private def lowLevel[F[_]: Async](config: KafkaSourceConfig): LowLevelSource[F, KafkaCheckpoints[F]] =
+  private def lowLevel[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
+    config: KafkaSourceConfig,
+    authHandlerClass: ClassTag[T]
+  ): LowLevelSource[F, KafkaCheckpoints[F]] =
     new LowLevelSource[F, KafkaCheckpoints[F]] {
       def checkpointer: Checkpointer[F, KafkaCheckpoints[F]] = kafkaCheckpointer
 
       def stream: Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
-        kafkaStream(config)
+        kafkaStream(config, authHandlerClass)
     }
 
   case class OffsetAndCommit[F[_]](offset: Long, commit: F[Unit])
@@ -59,9 +68,12 @@ object KafkaSource {
     def nack(c: KafkaCheckpoints[F]): F[Unit] = Applicative[F].unit
   }
 
-  private def kafkaStream[F[_]: Async](config: KafkaSourceConfig): Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
+  private def kafkaStream[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
+    config: KafkaSourceConfig,
+    authHandlerClass: ClassTag[T]
+  ): Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
     KafkaConsumer
-      .stream(consumerSettings[F](config))
+      .stream(consumerSettings[F, T](config, authHandlerClass))
       .evalTap(_.subscribeTo(config.topicName))
       .flatMap { consumer =>
         consumer.partitionsMapStream
@@ -124,8 +136,12 @@ object KafkaSource {
   private implicit def byteBufferDeserializer[F[_]: Sync]: Resource[F, ValueDeserializer[F, ByteBuffer]] =
     Resource.pure(Deserializer.lift(arr => Sync[F].pure(ByteBuffer.wrap(arr))))
 
-  private def consumerSettings[F[_]: Async](config: KafkaSourceConfig): ConsumerSettings[F, Array[Byte], ByteBuffer] =
+  private def consumerSettings[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
+    config: KafkaSourceConfig,
+    authHandlerClass: ClassTag[T]
+  ): ConsumerSettings[F, Array[Byte], ByteBuffer] =
     ConsumerSettings[F, Array[Byte], ByteBuffer]
+      .withProperty("sasl.login.callback.handler.class", authHandlerClass.runtimeClass.getName)
       .withBootstrapServers(config.bootstrapServers)
       .withProperties(config.consumerConf)
       .withEnableAutoCommit(false)

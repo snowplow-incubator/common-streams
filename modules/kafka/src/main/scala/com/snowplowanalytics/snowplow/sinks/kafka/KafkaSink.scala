@@ -14,13 +14,21 @@ import cats.Monad
 import com.snowplowanalytics.snowplow.sinks.{Sink, Sinkable}
 import fs2.kafka._
 
+import scala.reflect._
+
 import java.util.UUID
+
+import com.snowplowanalytics.snowplow.azure.AzureAuthenticationCallbackHandler
 
 object KafkaSink {
 
-  def resource[F[_]: Async](config: KafkaSinkConfig): Resource[F, Sink[F]] = {
+  def resource[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
+    config: KafkaSinkConfig,
+    authHandlerClass: ClassTag[T]
+  ): Resource[F, Sink[F]] = {
     val producerSettings =
       ProducerSettings[F, String, Array[Byte]]
+        .withProperty("sasl.login.callback.handler.class", authHandlerClass.runtimeClass.getName)
         .withBootstrapServers(config.bootstrapServers)
         .withProperties(config.producerConf)
 

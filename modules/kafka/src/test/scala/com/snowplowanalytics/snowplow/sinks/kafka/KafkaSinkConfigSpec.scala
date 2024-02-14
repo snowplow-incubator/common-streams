@@ -44,7 +44,10 @@ class KafkaSinkConfigSpec extends Specification {
       topicName        = "my-topic",
       bootstrapServers = "my-bootstrap-server:9092",
       producerConf = Map(
-        "client.id" -> "my-client-id"
+        "client.id" -> "my-client-id",
+        "security.protocol" -> "SASL_SSL",
+        "sasl.mechanism" -> "OAUTHBEARER",
+        "sasl.jaas.config" -> "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"
       )
     )
 
