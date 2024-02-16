@@ -1,3 +1,7 @@
+Version 0.4.0 (2024-02-16)
+--------------------------
+Kafka: authenticate with Event Hubs using OAuth2 (#57)
+
 Version 0.3.0 (2024-01-15)
 --------------------------
 Add StatsD metrics testing (#47)
