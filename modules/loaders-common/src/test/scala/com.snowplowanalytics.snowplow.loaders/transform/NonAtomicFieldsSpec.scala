@@ -70,7 +70,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -105,7 +105,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -140,7 +140,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -176,7 +176,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -214,7 +214,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -253,7 +253,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -271,7 +271,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity2 -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(2)) and
         (fields.map(_.tabledEntity) must contain(allOf(tabledEntity1, tabledEntity2)))
@@ -304,7 +304,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -354,7 +354,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -405,7 +405,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (failures must beEmpty) and
         (fields must haveSize(1)) and
         (fields.head must beEqualTo(expected))
@@ -421,7 +421,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 9))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (fields must beEmpty) and
         (failures must haveSize(1)) and
         (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
@@ -441,7 +441,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (fields must beEmpty) and
         (failures must haveSize(1)) and
         (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
@@ -461,7 +461,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input).map { case NonAtomicFields.Result(fields, failures) =>
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
       (fields must beEmpty) and
         (failures must haveSize(1)) and
         (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
