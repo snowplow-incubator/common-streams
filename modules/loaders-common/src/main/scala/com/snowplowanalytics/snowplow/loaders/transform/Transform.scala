@@ -45,11 +45,11 @@ object Transform {
     caster: Caster[A],
     event: Event,
     batchInfo: NonAtomicFields.Result
-  ): Either[BadRow, List[Caster.NamedValue[A]]] =
+  ): Either[BadRow, Vector[Caster.NamedValue[A]]] =
     failForResolverErrors(processor, event, batchInfo.igluFailures) *>
-      (forAtomic(caster, event), forEntities(caster, event, batchInfo.fields))
+      (forAtomic(caster, event), forEntities(caster, event, batchInfo.fields.toVector))
         .mapN { case (atomic, nonAtomic) =>
-          atomic ::: nonAtomic
+          atomic ++ nonAtomic
         }
         .toEither
         .leftMap { nel =>
@@ -80,12 +80,12 @@ object Transform {
     jsonCaster: Json.Folder[A],
     event: Event,
     entitiesToSkip: List[SchemaCriterion]
-  ): Either[BadRow, List[Caster.NamedValue[A]]] =
+  ): Either[BadRow, Vector[Caster.NamedValue[A]]] =
     forAtomic(caster, event).toEither
       .map { atomic =>
-        atomic ::: extractEntities(event, entitiesToSkip).iterator.map { case (key, json) =>
+        atomic ++ extractEntities(event, entitiesToSkip).iterator.map { case (key, json) =>
           Caster.NamedValue(key, json.foldWith(jsonCaster))
-        }.toList
+        }.toVector
       }
       .leftMap { nel =>
         BadRow.LoaderIgluError(processor, BadRowFailure.LoaderIgluErrors(nel), BadPayload.LoaderPayload(event))
@@ -147,8 +147,8 @@ object Transform {
   private def forEntities[A](
     caster: Caster[A],
     event: Event,
-    entities: List[TypedTabledEntity]
-  ): ValidatedNel[FailureDetails.LoaderIgluError, List[Caster.NamedValue[A]]] =
+    entities: Vector[TypedTabledEntity]
+  ): ValidatedNel[FailureDetails.LoaderIgluError, Vector[Caster.NamedValue[A]]] =
     entities.flatMap { case TypedTabledEntity(entity, field, subVersions, recoveries) =>
       val head = forEntity(caster, entity, field, subVersions, event)
       val tail = recoveries.map { case (recoveryVersion, recoveryField) =>
@@ -246,7 +246,7 @@ object Transform {
    *
    * TODO: implement this using Shapeless to make it less fragile
    */
-  private def forAtomic[A](caster: Caster[A], event: Event): ValidatedNel[FailureDetails.LoaderIgluError, List[Caster.NamedValue[A]]] =
+  private def forAtomic[A](caster: Caster[A], event: Event): ValidatedNel[FailureDetails.LoaderIgluError, Vector[Caster.NamedValue[A]]] =
     (
       event.tr_total.traverse(forMoney(caster, _)),
       event.tr_tax.traverse(forMoney(caster, _)),
@@ -257,7 +257,7 @@ object Transform {
       event.tr_shipping_base.traverse(forMoney(caster, _)),
       event.ti_price_base.traverse(forMoney(caster, _))
     ).mapN { case (trTotal, trTax, trShipping, tiPrice, trTotalBase, trTaxBase, trShippingBase, tiPriceBase) =>
-      List[A](
+      Vector[A](
         event.app_id.fold[A](caster.nullValue)(caster.stringValue(_)),
         event.platform.fold[A](caster.nullValue)(caster.stringValue(_)),
         event.etl_tstamp.fold[A](caster.nullValue)(caster.timestampValue(_)),

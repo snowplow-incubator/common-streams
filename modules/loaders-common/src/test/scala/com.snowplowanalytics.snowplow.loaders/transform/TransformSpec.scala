@@ -53,7 +53,7 @@ class TransformSpec extends Specification {
       NamedValue("geo_region", Json.Null)
     )
 
-    result must beRight { namedValues: List[NamedValue[Json]] =>
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
       expected
         .map { e =>
           namedValues must contain(e).exactly(1.times)
@@ -85,7 +85,7 @@ class TransformSpec extends Specification {
       NamedValue("tr_total", Json.fromDoubleOrNull(12.34))
     )
 
-    result must beRight { namedValues: List[NamedValue[Json]] =>
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
       expected
         .map { e =>
           namedValues must contain(e).exactly(1.times)
@@ -140,7 +140,7 @@ class TransformSpec extends Specification {
 
     val expected = NamedValue("unstruct_event_com_example_my_schema_7", data)
 
-    result must beRight { namedValues: List[NamedValue[Json]] =>
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
       namedValues must contain(expected).exactly(1.times)
     }
   }
@@ -196,7 +196,7 @@ class TransformSpec extends Specification {
       )
     )
 
-    result must beRight { namedValues: List[NamedValue[Json]] =>
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
       expected
         .map { e =>
           namedValues must contain(e).exactly(1.times)
@@ -249,7 +249,7 @@ class TransformSpec extends Specification {
             """
     )
 
-    result must beRight { namedValues: List[NamedValue[Json]] =>
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
       namedValues must contain(expected).exactly(1.times)
     }
   }
