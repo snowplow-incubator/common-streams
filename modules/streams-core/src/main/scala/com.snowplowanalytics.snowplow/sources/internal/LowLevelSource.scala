@@ -86,8 +86,8 @@ private[sources] object LowLevelSource {
   ): SourceAndAck[F] = new SourceAndAck[F] {
     def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] = {
       val str = for {
-        acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
         s2 <- source.stream
+        acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
         _ <- Stream.bracket(isConnectedRef.set(true))(_ => isConnectedRef.set(false))
       } yield {
         val tokenedSources = s2
