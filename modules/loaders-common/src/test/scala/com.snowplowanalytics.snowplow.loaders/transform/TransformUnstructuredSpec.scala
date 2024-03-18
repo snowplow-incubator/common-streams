@@ -26,8 +26,8 @@ import java.util.UUID
 import java.time.{Instant, LocalDate}
 import scala.util.Random
 
-class TransformSpec extends Specification {
-  import TransformSpec._
+class TransformUnstructuredSpec extends Specification {
+  import TransformUnstructuredSpec._
 
   def is = s2"""
   Transform.transformEventUnstructured should
@@ -270,7 +270,7 @@ class TransformSpec extends Specification {
 
 }
 
-object TransformSpec {
+object TransformUnstructuredSpec {
 
   val testEventId   = UUID.randomUUID
   val testTimestamp = Instant.now
