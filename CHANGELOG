@@ -1,3 +1,11 @@
+Version 0.5.0 (2024-03-19)
+--------------------------
+Improve timings of overlapping windows (#64)
+Fix nacking unhandled pubsub messages during shutdown (#63)
+Use `Vector` instead of `List` in transform methods.
+For structured data add ability to skip schemas matching criterion.
+Add `AcceptedLicense` model
+
 Version 0.4.0 (2024-02-16)
 --------------------------
 Kafka: authenticate with Event Hubs using OAuth2 (#57)
