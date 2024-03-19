@@ -241,21 +241,20 @@ private[sources] object LowLevelSource {
             case Some(q) => Pull.eval(q.offer(None)) >> Pull.done
           }
         case Some((Left(_), next)) =>
-          val openWindow =
-            Pull.eval(Logger[F].info(s"Opening new window with duration ${config.duration}")) >> next.timeout(config.duration)
           current match {
-            case None    => openWindow >> go(next, None)
-            case Some(q) => openWindow >> Pull.eval(q.offer(None)) >> go(next, None)
+            case None    => go(next, None)
+            case Some(q) => Pull.eval(q.offer(None)) >> go(next, None)
           }
         case Some((Right(chunk), next)) =>
           current match {
             case None =>
-              for {
+              val pull = for {
                 q <- Pull.eval(Queue.synchronous[F, Option[A]])
                 _ <- Pull.output1(Stream.fromQueueNoneTerminated(q))
                 _ <- Pull.eval(chunk.traverse(a => q.offer(Some(a))))
-                _ <- go(next, Some(q))
-              } yield ()
+                _ <- Pull.eval(Logger[F].info(s"Opening new window with duration ${config.duration}")) >> next.timeout(config.duration)
+              } yield go(next, Some(q))
+              pull.flatten
             case Some(q) =>
               Pull.eval(chunk.traverse(a => q.offer(Some(a)))) >> go(next, Some(q))
           }
@@ -265,11 +264,11 @@ private[sources] object LowLevelSource {
       in.pull
         .timed { timedPull: Pull.Timed[F, A] =>
           val timeout = timeoutForFirstWindow(config)
-          for {
+          val pull = for {
             _ <- Pull.eval(Logger[F].info(s"Opening first window with randomly adjusted duration of $timeout"))
             _ <- timedPull.timeout(timeout)
-            _ <- go(timedPull, None)
-          } yield ()
+          } yield go(timedPull, None)
+          pull.flatten
         }
         .stream
         .prefetch // This prefetch is required to pull items into the emitted stream
