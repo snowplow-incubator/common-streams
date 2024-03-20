@@ -49,7 +49,7 @@ object Transform {
     failForResolverErrors(processor, event, batchInfo.igluFailures) *>
       (forAtomic(caster, event), forEntities(caster, event, batchInfo.fields.toVector))
         .mapN { case (atomic, nonAtomic) =>
-          atomic ++ nonAtomic
+          atomic ++ nonAtomic.take(1)
         }
         .toEither
         .leftMap { nel =>
