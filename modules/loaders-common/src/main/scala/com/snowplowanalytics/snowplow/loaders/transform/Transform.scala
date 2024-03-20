@@ -255,8 +255,7 @@ object Transform {
       event.tr_total_base.traverse(forMoney(caster, _)),
       event.tr_tax_base.traverse(forMoney(caster, _)),
       event.tr_shipping_base.traverse(forMoney(caster, _)),
-      event.ti_price_base.traverse(forMoney(caster, _))
-    ).mapN { case (trTotal, trTax, trShipping, tiPrice, trTotalBase, trTaxBase, trShippingBase, tiPriceBase) =>
+    ).mapN { case (trTotal, trTax, trShipping, tiPrice, trTotalBase, trTaxBase, trShippingBase) =>
       Vector[A](
         event.app_id.fold[A](caster.nullValue)(caster.stringValue(_)),
         event.platform.fold[A](caster.nullValue)(caster.stringValue(_)),
@@ -369,7 +368,7 @@ object Transform {
         trTaxBase.getOrElse(caster.nullValue),
         trShippingBase.getOrElse(caster.nullValue),
         event.ti_currency.fold[A](caster.nullValue)(caster.stringValue(_)),
-        tiPriceBase.getOrElse(caster.nullValue),
+        event.ti_price_base.fold[A](caster.nullValue)(caster.doubleValue(_)),
         event.base_currency.fold[A](caster.nullValue)(caster.stringValue(_)),
         event.geo_timezone.fold[A](caster.nullValue)(caster.stringValue(_)),
         event.mkt_clickid.fold[A](caster.nullValue)(caster.stringValue(_)),
