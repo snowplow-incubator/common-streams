@@ -16,6 +16,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.{HttpApp, Response, Status}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import fs2.io.net.Network
 
 object HealthProbe {
 
@@ -25,7 +26,8 @@ object HealthProbe {
   case object Healthy extends Status
   case class Unhealthy(reason: String) extends Status
 
-  def resource[F[_]: Async](port: Port, isHealthy: F[Status]): Resource[F, Unit] =
+  def resource[F[_]: Async](port: Port, isHealthy: F[Status]): Resource[F, Unit] = {
+    implicit val network: Network[F] = Network.forAsync[F]
     EmberServerBuilder
       .default[F]
       .withHost(Ipv4Address.fromBytes(0, 0, 0, 0))
@@ -37,6 +39,7 @@ object HealthProbe {
         Logger[F].info(s"Health service listening on port $port")
       }
       .void
+  }
 
   object decoders {
     implicit def portDecoder: Decoder[Port] = Decoder.decodeInt.emap { port =>
