@@ -19,6 +19,8 @@ import retry.RetryPolicies
 
 class MetricsSpec extends CatsResource[IO, (GenericContainer[_], StatsdAPI[IO])] with SpecificationLike {
 
+  override val Timeout: FiniteDuration = 3.minutes
+
   override val resource: Resource[IO, (GenericContainer[_], StatsdAPI[IO])] =
     for {
       statsd <- Statsd.resource(TestMetrics.getClass.getSimpleName)
