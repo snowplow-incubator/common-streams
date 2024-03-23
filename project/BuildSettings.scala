@@ -42,7 +42,10 @@ object BuildSettings {
     scalacOptions += "-Ywarn-macros:after",
     scalacOptions += "-Wconf:origin=scala.collection.compat.*:s",
     Test / fork := true,
-    Test / envVars := Map("CONFIG_PARSER_TEST_ENV" -> "envValue"),
+    Test / envVars := Map(
+      "CONFIG_PARSER_TEST_ENV" -> "envValue",
+      "HOSTNAME" -> sys.env.getOrElse("HOSTNAME", "fallback-hostname") // Tests require HOSTNAME to be set
+    ),
     addCompilerPlugin(Dependencies.betterMonadicFor),
     addCompilerPlugin(Dependencies.kindProjector),
     ThisBuild / autoAPIMappings := true,

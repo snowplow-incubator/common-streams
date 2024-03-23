@@ -23,7 +23,7 @@ import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.kinesis.common.{InitialPositionInStream, InitialPositionInStreamExtended}
 
 import java.net.URI
-import java.util.{Date, UUID}
+import java.util.Date
 import java.util.concurrent.Semaphore
 
 // kinesis
@@ -167,7 +167,7 @@ object KinesisSource {
     kinesisConfig: KinesisSourceConfig,
     recordProcessorFactory: ShardRecordProcessorFactory
   ): F[Scheduler] =
-    Sync[F].delay(UUID.randomUUID()).map { uuid =>
+    Sync[F].delay {
       val configsBuilder =
         new ConfigsBuilder(
           kinesisConfig.streamName,
@@ -175,7 +175,7 @@ object KinesisSource {
           kinesisClient,
           dynamoDbClient,
           cloudWatchClient,
-          s"$uuid",
+          kinesisConfig.workerIdentifier,
           recordProcessorFactory
         )
 
@@ -191,10 +191,14 @@ object KinesisSource {
             }
           }
 
+      val leaseManagementConfig =
+        configsBuilder.leaseManagementConfig
+          .failoverTimeMillis(kinesisConfig.leaseDuration.toMillis)
+
       new Scheduler(
         configsBuilder.checkpointConfig,
         configsBuilder.coordinatorConfig,
-        configsBuilder.leaseManagementConfig,
+        leaseManagementConfig,
         configsBuilder.lifecycleConfig,
         configsBuilder.metricsConfig.metricsLevel(MetricsLevel.NONE),
         configsBuilder.processorConfig,

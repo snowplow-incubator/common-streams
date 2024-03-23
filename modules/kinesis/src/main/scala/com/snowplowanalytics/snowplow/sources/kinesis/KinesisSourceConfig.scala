@@ -10,21 +10,25 @@ package com.snowplowanalytics.snowplow.sources.kinesis
 import eu.timepit.refined.types.all.PosInt
 
 import io.circe._
+import io.circe.config.syntax._
 import io.circe.generic.extras.semiauto.deriveConfiguredDecoder
 import io.circe.generic.extras.Configuration
 
 import java.net.URI
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 case class KinesisSourceConfig(
   appName: String,
   streamName: String,
+  workerIdentifier: String,
   initialPosition: KinesisSourceConfig.InitialPosition,
   retrievalMode: KinesisSourceConfig.Retrieval,
   bufferSize: PosInt,
   customEndpoint: Option[URI],
   dynamodbCustomEndpoint: Option[URI],
-  cloudwatchCustomEndpoint: Option[URI]
+  cloudwatchCustomEndpoint: Option[URI],
+  leaseDuration: FiniteDuration
 )
 
 object KinesisSourceConfig {
