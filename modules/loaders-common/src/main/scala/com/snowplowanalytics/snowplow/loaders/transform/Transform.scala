@@ -47,7 +47,7 @@ object Transform {
     batchInfo: NonAtomicFields.Result
   ): Either[BadRow, Vector[Caster.NamedValue[A]]] =
     failForResolverErrors(processor, event, batchInfo.igluFailures) *>
-      (forAtomic(caster, event), forEntities(caster, event, batchInfo.fields.toVector))
+      (forAtomic(caster, event), forEntities(caster, event, batchInfo.fields))
         .mapN { case (atomic, nonAtomic) =>
           atomic ++ nonAtomic
         }

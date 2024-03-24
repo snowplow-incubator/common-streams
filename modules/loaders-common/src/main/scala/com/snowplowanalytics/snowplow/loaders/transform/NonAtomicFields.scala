@@ -28,7 +28,7 @@ object NonAtomicFields {
    *   details of schemas that were present in the batch but could not be looked up by the Iglu
    *   resolver.
    */
-  case class Result(fields: List[TypedTabledEntity], igluFailures: List[ColumnFailure])
+  case class Result(fields: Vector[TypedTabledEntity], igluFailures: List[ColumnFailure])
 
   /**
    * Describes a failure to lookup a series of Iglu schemas
@@ -51,7 +51,7 @@ object NonAtomicFields {
     entities: Map[TabledEntity, Set[SchemaSubVersion]],
     filterCriteria: List[SchemaCriterion]
   ): F[Result] =
-    entities.toList
+    entities.toVector
       .map { case (tabledEntity, subVersions) =>
         // First phase of entity filtering, before we fetch schemas from Iglu and create `TypedTabledEntity`.
         // If all sub-versions are filtered out, whole family is removed.
@@ -78,7 +78,7 @@ object NonAtomicFields {
       }
       .map { eithers =>
         val (failures, good) = eithers.separate
-        Result(good, failures)
+        Result(good, failures.toList)
       }
 
   private def filterSubVersions(
