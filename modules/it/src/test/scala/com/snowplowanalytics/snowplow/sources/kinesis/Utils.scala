@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.time.Instant
 import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.DurationLong
 
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamRequest
 
@@ -90,12 +91,14 @@ object Utils {
   def getKinesisSourceConfig(endpoint: URI)(streamName: String): KinesisSourceConfig = KinesisSourceConfig(
     UUID.randomUUID().toString,
     streamName,
+    UUID.randomUUID.toString,
     KinesisSourceConfig.InitialPosition.TrimHorizon,
     KinesisSourceConfig.Retrieval.Polling(1),
     PosInt.unsafeFrom(1),
     Some(endpoint),
     Some(endpoint),
-    Some(endpoint)
+    Some(endpoint),
+    10.seconds
   )
 
   def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfig(
