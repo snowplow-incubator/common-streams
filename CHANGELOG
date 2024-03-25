@@ -1,3 +1,10 @@
+Version 0.5.1 (2024-03-25)
+--------------------------
+Bump all dependencies to latest versions (#71)
+Kinesis source options to allow less lease-stealing (#70)
+Add unit test for `Transform.transformEvent` method.
+Use `Vector` instead of `List` in transform methods: part 2 (#66)
+
 Version 0.5.0 (2024-03-19)
 --------------------------
 Improve timings of overlapping windows (#64)
