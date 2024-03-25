@@ -11,31 +11,31 @@ object Dependencies {
 
   object V {
     // Scala
-    val cats             = "2.9.0"
-    val catsEffect       = "3.5.2"
-    val catsRetry        = "3.1.0"
-    val fs2              = "3.9.3"
+    val cats             = "2.10.0"
+    val catsEffect       = "3.5.4"
+    val catsRetry        = "3.1.3"
+    val fs2              = "3.10.0"
     val log4cats         = "2.6.0"
-    val http4s           = "0.23.15"
+    val http4s           = "0.23.26"
     val decline          = "2.4.1"
     val circe            = "0.14.6"
     val circeExtra       = "0.14.3"
-    val circeConfig      = "0.10.0"
+    val circeConfig      = "0.10.1"
     val betterMonadicFor = "0.3.1"
     val kindProjector    = "0.13.2"
     val collectionCompat = "2.11.0"
-    val refined          = "0.11.0"
+    val refined          = "0.11.1"
 
     // Streams
-    val fs2Kafka      = "3.0.1"
-    val pubsub        = "1.123.17"
+    val fs2Kafka      = "3.4.0"
+    val pubsub        = "1.127.3"
     val fs2AwsKinesis = "4.1.0"
-    val awsSdk2       = "2.20.135"
-    val kinesisClient = "2.5.2"
+    val awsSdk2       = "2.25.16"
+    val kinesisClient = "2.5.7"
 
     // java
-    val slf4j    = "2.0.9"
-    val azureSdk = "1.9.1"
+    val slf4j    = "2.0.12"
+    val azureSdk = "1.11.4"
 
     // Snowplow
     val schemaDdl    = "0.21.0"
@@ -43,9 +43,6 @@ object Dependencies {
     val igluClient   = "3.1.0"
     val tracker      = "2.0.0"
     val analyticsSdk = "3.2.1"
-
-    // Transitive overrides
-    val snappy = "1.1.10.2"
 
     // tests
     val specs2           = "4.20.0"
@@ -94,9 +91,6 @@ object Dependencies {
   val slf4jSimple   = "org.slf4j" % "slf4j-simple"   % V.slf4j
   val slf4jApi      = "org.slf4j" % "slf4j-api"      % V.slf4j
   val azureIdentity = "com.azure" % "azure-identity" % V.azureSdk
-
-  // transitive overrides
-  val snappy = "org.xerial.snappy" % "snappy-java" % V.snappy
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"                      % V.badrows
   val tracker      = "com.snowplowanalytics" %% "snowplow-scala-tracker-core"           % V.tracker
@@ -154,7 +148,6 @@ object Dependencies {
     circeConfig,
     circeGeneric,
     azureIdentity,
-    snappy,
     specs2
   )
 
