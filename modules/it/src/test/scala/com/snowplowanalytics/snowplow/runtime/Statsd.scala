@@ -17,12 +17,13 @@ import com.github.dockerjava.api.model.ExposedPort
 import com.github.dockerjava.api.model.Ports
 
 object Statsd {
-
+  val image = "dblworks/statsd" // the official statsd/statsd size is monstrous
+  val tag   = "v0.10.1"
   def resource(
     loggerName: String
   ): Resource[IO, GenericContainer[_]] =
     Resource.make {
-      val statsd: GenericContainer[_] = new GenericContainer("statsd/statsd:v0.10.1")
+      val statsd: GenericContainer[_] = new GenericContainer(s"$image:$tag")
       statsd.addExposedPort(8126)
       statsd.setWaitStrategy(Wait.forLogMessage("""^(.*)server is up(.+)$""", 1))
       statsd.withCreateContainerCmdModifier { cmd =>
@@ -33,7 +34,7 @@ object Statsd {
         cmd.getHostConfig().withPortBindings(ports)
         ()
       }
-      IO(start(statsd, loggerName))
+      IO.blocking(start(statsd, loggerName))
     }(ls => IO.blocking(ls.stop()))
 
   private def start(statsd: GenericContainer[_], loggerName: String): GenericContainer[_] = {

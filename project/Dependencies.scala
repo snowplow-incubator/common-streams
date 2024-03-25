@@ -52,6 +52,7 @@ object Dependencies {
     val catsEffectSpecs2 = "1.5.0"
     val localstack       = "1.19.0"
     val eventGen         = "0.7.0"
+    val dockerJava       = "3.3.6"
   }
 
   val catsEffectKernel  = "org.typelevel"          %% "cats-effect-kernel"      % V.catsEffect
@@ -110,6 +111,7 @@ object Dependencies {
   val catsEffectTestkit = "org.typelevel"         %% "cats-effect-testkit"           % V.catsEffect       % Test
   val catsEffectSpecs2  = "org.typelevel"         %% "cats-effect-testing-specs2"    % V.catsEffectSpecs2 % Test
   val eventGen          = "com.snowplowanalytics" %% "snowplow-event-generator-core" % V.eventGen         % Test
+  val dockerJava        = "com.github.docker-java" % "docker-java"                   % V.dockerJava
 
   val streamsDependencies = Seq(
     cats,
@@ -146,7 +148,8 @@ object Dependencies {
     catsEffectSpecs2It  % Test,
     catsRetry           % Test,
     localstackIt        % Test,
-    slf4jIt             % Test
+    slf4jIt             % Test,
+    dockerJava          % Test
   )
 
   val kafkaDependencies = Seq(
