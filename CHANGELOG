@@ -1,3 +1,7 @@
+Version 0.5.2 (2024-03-26)
+--------------------------
+Bump schema-ddl to 0.22.2
+
 Version 0.5.1 (2024-03-25)
 --------------------------
 Bump all dependencies to latest versions (#71)
