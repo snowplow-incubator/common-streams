@@ -14,31 +14,15 @@ import cats.effect.testing.specs2.CatsResource
 import org.specs2.mutable.SpecificationLike
 import org.specs2.specification.BeforeAll
 import org.testcontainers.containers.GenericContainer
-import com.github.dockerjava.core.DockerClientBuilder
-import com.github.dockerjava.api.command.PullImageResultCallback
+import com.snowplowanalytics.snowplow.it.DockerPull
 
 import retry.syntax.all._
 import retry.RetryPolicies
-import com.github.dockerjava.api.model.PullResponseItem
 
 class MetricsSpec extends CatsResource[IO, (GenericContainer[_], StatsdAPI[IO])] with SpecificationLike with BeforeAll {
 
   override def beforeAll(): Unit = {
-    // blocking the main thread to fetch before we start creating a container
-    DockerClientBuilder
-      .getInstance()
-      .build()
-      .pullImageCmd(Statsd.image)
-      .withTag(Statsd.tag)
-      .withPlatform("linux/amd64")
-      .exec(new PullImageResultCallback() {
-        override def onNext(item: PullResponseItem) = {
-          println(s"StatsD image: ${item.getStatus()}")
-          super.onNext(item)
-        }
-      })
-      .awaitCompletion()
-      .onComplete()
+    DockerPull.pull(Statsd.image, Statsd.tag)
     super.beforeAll()
   }
 

@@ -21,18 +21,26 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
 import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
+import com.snowplowanalytics.snowplow.it.DockerPull
 import com.snowplowanalytics.snowplow.it.kinesis._
 
 import java.time.Instant
 
 import Utils._
 
+import org.specs2.specification.BeforeAll
+
 class KinesisSourceSpec
     extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)]
-    with SpecificationLike {
+    with SpecificationLike
+    with BeforeAll {
   import KinesisSourceSpec._
 
   override val Timeout: FiniteDuration = 3.minutes
+  override def beforeAll(): Unit = {
+    DockerPull.pull(Localstack.image, Localstack.tag)
+    super.beforeAll()
+  }
 
   /** Resources which are shared across tests */
   override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =

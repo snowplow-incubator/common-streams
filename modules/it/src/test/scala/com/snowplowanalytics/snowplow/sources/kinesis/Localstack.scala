@@ -16,14 +16,15 @@ import org.testcontainers.utility.DockerImageName
 import software.amazon.awssdk.regions.Region
 
 object Localstack {
-
+  val image = "localstack/localstack"
+  val tag   = "2.3.2"
   def resource(
     region: Region,
     kinesisInitializeStreams: String,
     loggerName: String
   ): Resource[IO, LocalStackContainer] =
     Resource.make {
-      val localstack = new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.3.2"))
+      val localstack = new LocalStackContainer(DockerImageName.parse(s"$image:$tag"))
       localstack.addEnv("AWS_DEFAULT_REGION", region.id)
       localstack.addEnv("KINESIS_INITIALIZE_STREAMS", kinesisInitializeStreams)
       localstack.addExposedPort(4566)
