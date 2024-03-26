@@ -19,15 +19,21 @@ import org.testcontainers.containers.localstack.LocalStackContainer
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.regions.Region
 
+import com.snowplowanalytics.snowplow.it.DockerPull
 import com.snowplowanalytics.snowplow.it.kinesis._
 import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
 
 import Utils._
+import org.specs2.specification.BeforeAll
 
-class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sink[IO])] with SpecificationLike {
+class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sink[IO])] with SpecificationLike with BeforeAll {
   import KinesisSinkSpec._
 
   override val Timeout: FiniteDuration = 3.minutes
+  override def beforeAll(): Unit = {
+    DockerPull.pull(Localstack.image, Localstack.tag)
+    super.beforeAll()
+  }
 
   /** Resources which are shared across tests */
   override val resource: Resource[IO, (Region, LocalStackContainer, Sink[IO])] =
