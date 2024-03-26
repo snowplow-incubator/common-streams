@@ -428,10 +428,10 @@ class TransformStructuredSpec extends Specification {
       igluFailures = List.empty
     )
 
-    val expectedError = FailureDetails.LoaderIgluError.MissingInValue(
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
       SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 0)),
-      key   = "my_string",
-      value = json"""{ "my_string": null}"""
+      value    = Json.Null,
+      expected = "String"
     )
 
     assertLoaderError(inputEvent, batchInfo, List(expectedError))
@@ -462,10 +462,10 @@ class TransformStructuredSpec extends Specification {
       igluFailures = List.empty
     )
 
-    val expectedError = FailureDetails.LoaderIgluError.MissingInValue(
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
       SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 0)),
-      key   = "my_string",
-      value = json"""{  "_schema_version": "1-0-0", "my_string": null}"""
+      value    = Json.Null,
+      expected = "String"
     )
 
     assertLoaderError(inputEvent, batchInfo, List(expectedError))
