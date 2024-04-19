@@ -69,16 +69,18 @@ object NonAtomicFields {
           // We can't do it sooner based on a result of `fetchSchemasWithSameModel` because we can't have 'holes' in Iglu schema family when building typed entities.
           // Otherwise we may end up with invalid and incompatible merged schema model.
           // Here `TypedTabledEntity` is already properly created using contiguous series of schemas, so we can try to skip some sub-versions.
-          .map { typedTabledEntity =>
-            val filteredSubVersions = filterSubVersions(filterCriteria, typedTabledEntity.tabledEntity, typedTabledEntity.mergedVersions)
-            typedTabledEntity.copy(mergedVersions = filteredSubVersions)
+          .map {
+            _.map { typedTabledEntity =>
+              val filteredSubVersions = filterSubVersions(filterCriteria, typedTabledEntity.tabledEntity, typedTabledEntity.mergedVersions)
+              typedTabledEntity.copy(mergedVersions = filteredSubVersions)
+            }
           }
           .leftMap(ColumnFailure(tabledEntity, subVersions, _))
           .value
       }
       .map { eithers =>
         val (failures, good) = eithers.separate
-        Result(good, failures.toList)
+        Result(good.flatten, failures.toList)
       }
 
   private def filterSubVersions(

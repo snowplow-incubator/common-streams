@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.loaders.transform
 
 import cats.effect.IO
+import cats.data.NonEmptyVector
 import org.specs2.Specification
 import cats.effect.testing.specs2.CatsEffect
 import com.snowplowanalytics.iglu.client.Resolver
@@ -25,11 +26,15 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       return an un-merged schema if the batch uses the first schema in a series $ue1
       return a merged schema if the batch uses the last schema in a series $ue2
       return a merged schema if the batch uses all schemas in a series $ue3
+      return nothing for the Iglu Central ad_break_end_event schema $ue4
+      return a JSON field for the Iglu Central anything-a schema $ue5
 
     when resolving for known schemas in contexts should
       return an un-merged schema if the batch uses the first schema in a series $c1
       return a merged schema if the batch uses the last schema in a series $c2
       return a merged schema if the batch uses all schemas in a series $c3
+      return nothing for the Iglu Central ad_break_end_event schema $c4
+      return a JSON field for the Iglu Central anything-a schema $c5
 
     when resolving for known schema in contexts and unstruct_event should
       return separate entity for the context and the unstruct_event $both1
@@ -55,7 +60,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required)
         )
       )
@@ -88,7 +93,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required),
           Field("col_c", Type.String, Nullable),
           Field("col_b", Type.String, Nullable)
@@ -123,7 +128,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required),
           Field("col_c", Type.String, Nullable),
           Field("col_b", Type.String, Nullable)
@@ -148,6 +153,51 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
   }
 
+  def ue4 = {
+
+    // Example of a schema which is an empty object with no additional properties
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "com.snowplowanalytics.snowplow.media", "ad_break_end_event", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must beEmpty)
+    }
+
+  }
+
+  def ue5 = {
+
+    // Example of a permissive schema which permits any JSON
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "com.snowplowanalytics.iglu", "anything-a", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    val expected = {
+      val expectedType  = Type.Json
+      val expectedField = Field("unstruct_event_com_snowplowanalytics_iglu_anything_a_1", expectedType, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 0)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must haveSize(1)) and
+        (fields.head must beEqualTo(expected))
+    }
+
+  }
+
   def c1 = {
 
     val tabledEntity = TabledEntity(TabledEntity.Context, "myvendor", "myschema", 7)
@@ -158,7 +208,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("_schema_version", Type.String, Required),
           Field("col_a", Type.String, Required)
         )
@@ -194,7 +244,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("_schema_version", Type.String, Required),
           Field("col_a", Type.String, Required),
           Field("col_c", Type.String, Nullable),
@@ -233,7 +283,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
     val expected = {
 
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("_schema_version", Type.String, Required),
           Field("col_a", Type.String, Required),
           Field("col_c", Type.String, Nullable),
@@ -249,6 +299,55 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
         tabledEntity,
         expectedField,
         Set((0, 0), (0, 1), (1, 0)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must haveSize(1)) and
+        (fields.head must beEqualTo(expected))
+    }
+
+  }
+
+  def c4 = {
+
+    // Example of a schema which is an empty object with no additional properties
+    val tabledEntity = TabledEntity(TabledEntity.Context, "com.snowplowanalytics.snowplow.media", "ad_break_end_event", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must beEmpty)
+    }
+
+  }
+
+  def c5 = {
+
+    // Example of a permissive schema which permits any JSON
+    val tabledEntity = TabledEntity(TabledEntity.Context, "com.snowplowanalytics.iglu", "anything-a", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    val expected = {
+
+      val expectedType = Type.Json
+
+      val expectedArray = Type.Array(expectedType, Nullable)
+
+      val expectedField = Field("contexts_com_snowplowanalytics_iglu_anything_a_1", expectedArray, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 0)),
         Nil
       )
     }
@@ -289,7 +388,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required)
         )
       )
@@ -322,19 +421,19 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required)
         )
       )
 
       val recoveryStruct1 = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.Double, Required)
         )
       )
 
       val recoveryStruct2 = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.Boolean, Required)
         )
       )
@@ -372,20 +471,20 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     val expected = {
       val expectedStruct = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.String, Required),
           Field("col_b", Type.Long, Nullable)
         )
       )
 
       val recoveryStruct1 = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.Double, Required)
         )
       )
 
       val recoveryStruct2 = Type.Struct(
-        List(
+        NonEmptyVector.of(
           Field("col_a", Type.Boolean, Required)
         )
       )

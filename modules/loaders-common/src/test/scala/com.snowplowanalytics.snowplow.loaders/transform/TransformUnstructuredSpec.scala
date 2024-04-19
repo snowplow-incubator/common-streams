@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.loaders.transform
 
 import org.specs2.Specification
+import cats.data.NonEmptyVector
 import io.circe._
 import io.circe.literal._
 import io.circe.syntax._
@@ -283,18 +284,18 @@ object TransformUnstructuredSpec {
   val testSchemaKey801 = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/8-0-1").toOption.get
 
   val typeCaster = new Caster[String] {
-    override def nullValue: String                                             = "null"
-    override def jsonValue(v: Json): String                                    = "json"
-    override def stringValue(v: String): String                                = "string"
-    override def booleanValue(v: Boolean): String                              = "boolean"
-    override def intValue(v: Int): String                                      = "int"
-    override def longValue(v: Long): String                                    = "long"
-    override def doubleValue(v: Double): String                                = "double"
-    override def decimalValue(unscaled: BigInt, details: Type.Decimal): String = "double"
-    override def timestampValue(v: Instant): String                            = "timestamp"
-    override def dateValue(v: LocalDate): String                               = "date"
-    override def arrayValue(vs: List[String]): String                          = "array"
-    override def structValue(vs: List[Caster.NamedValue[String]]): String      = "struct"
+    override def nullValue: String                                                  = "null"
+    override def jsonValue(v: Json): String                                         = "json"
+    override def stringValue(v: String): String                                     = "string"
+    override def booleanValue(v: Boolean): String                                   = "boolean"
+    override def intValue(v: Int): String                                           = "int"
+    override def longValue(v: Long): String                                         = "long"
+    override def doubleValue(v: Double): String                                     = "double"
+    override def decimalValue(unscaled: BigInt, details: Type.Decimal): String      = "double"
+    override def timestampValue(v: Instant): String                                 = "timestamp"
+    override def dateValue(v: LocalDate): String                                    = "date"
+    override def arrayValue(vs: Vector[String]): String                             = "array"
+    override def structValue(vs: NonEmptyVector[Caster.NamedValue[String]]): String = "struct"
   }
 
   val typeCirceFolder = new Json.Folder[String] {

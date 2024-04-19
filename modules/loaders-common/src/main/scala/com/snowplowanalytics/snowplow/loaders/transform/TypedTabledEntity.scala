@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.data.NonEmptyList
+import cats.data.NonEmptyVector
 import cats.implicits._
 import io.circe.syntax._
 import com.snowplowanalytics.iglu.core.{SchemaKey, SelfDescribingSchema}
@@ -56,38 +56,43 @@ object TypedTabledEntity {
   private[transform] def build(
     tabledEntity: TabledEntity,
     subVersions: Set[SchemaSubVersion],
-    schemas: NonEmptyList[SelfDescribingSchema[Schema]]
-  ): TypedTabledEntity = {
+    schemas: NonEmptyVector[SelfDescribingSchema[Schema]]
+  ): Option[TypedTabledEntity] =
     // Schemas need to be ordered by key to merge in correct order.
-    val NonEmptyList(root, tail) = schemas.sorted
-    val tte = tail
-      .foldLeft(initColumnGroup(tabledEntity, root)) { case (columnGroup, selfDescribingSchema) =>
-        val field      = fieldFromSchema(tabledEntity, selfDescribingSchema.schema)
-        val schemaKey  = selfDescribingSchema.self.schemaKey
-        val subversion = keyToSubVersion(schemaKey)
-        Migrations.mergeSchemas(columnGroup.mergedField, field) match {
-          case Left(_) =>
-            if (subVersions.contains(subversion)) {
-              val hash = "%08x".format(selfDescribingSchema.schema.asJson.noSpaces.hashCode())
-              // typedField always has a single element in matchingKeys
-              val recoverPoint = schemaKey.version.asString.replaceAll("-", "_")
-              val newName      = s"${field.name}_recovered_${recoverPoint}_$hash"
-              columnGroup.copy(recoveries = (subversion -> field.copy(name = newName)) :: columnGroup.recoveries)
-            } else {
-              // do not create a recovered column if that type were not in the batch
-              columnGroup
-            }
-          case Right(mergedField) =>
-            columnGroup.copy(mergedField = mergedField, mergedVersions = columnGroup.mergedVersions + subversion)
-        }
+    schemas.sorted.toVector
+      .flatMap { case sds =>
+        fieldFromSchema(tabledEntity, sds.schema).map((_, sds))
       }
-    tte.copy(recoveries = tte.recoveries.reverse)
-  }
+      .toNev
+      .map { nev =>
+        val (rootField, rootSchema) = nev.head
+        val tte                     = TypedTabledEntity(tabledEntity, rootField, Set(keyToSubVersion(rootSchema.self.schemaKey)), Nil)
+        nev.tail
+          .foldLeft(tte) { case (columnGroup, (field, selfDescribingSchema)) =>
+            val schemaKey  = selfDescribingSchema.self.schemaKey
+            val subversion = keyToSubVersion(schemaKey)
+            Migrations.mergeSchemas(columnGroup.mergedField, field) match {
+              case Left(_) =>
+                if (subVersions.contains(subversion)) {
+                  val hash = "%08x".format(selfDescribingSchema.schema.asJson.noSpaces.hashCode())
+                  // typedField always has a single element in matchingKeys
+                  val recoverPoint = schemaKey.version.asString.replaceAll("-", "_")
+                  val newName      = s"${field.name}_recovered_${recoverPoint}_$hash"
+                  columnGroup.copy(recoveries = (subversion -> field.copy(name = newName)) :: columnGroup.recoveries)
+                } else {
+                  // do not create a recovered column if that type were not in the batch
+                  columnGroup
+                }
+              case Right(mergedField) =>
+                columnGroup.copy(mergedField = mergedField, mergedVersions = columnGroup.mergedVersions + subversion)
+            }
+          }
+      }
+      .map { tte =>
+        tte.copy(recoveries = tte.recoveries.reverse)
+      }
 
-  private def initColumnGroup(tabledEntity: TabledEntity, root: SelfDescribingSchema[Schema]): TypedTabledEntity =
-    TypedTabledEntity(tabledEntity, fieldFromSchema(tabledEntity, root.schema), Set(keyToSubVersion(root.self.schemaKey)), Nil)
-
-  private def fieldFromSchema(tabledEntity: TabledEntity, schema: Schema): Field = {
+  private def fieldFromSchema(tabledEntity: TabledEntity, schema: Schema): Option[Field] = {
     val sdkEntityType = tabledEntity.entityType match {
       case TabledEntity.UnstructEvent => SdkData.UnstructEvent
       case TabledEntity.Context       => SdkData.Contexts(SdkData.CustomContexts)
@@ -96,21 +101,18 @@ object TypedTabledEntity {
 
     val field = tabledEntity.entityType match {
       case TabledEntity.UnstructEvent =>
-        Field.normalize {
-          Field.build(fieldName, schema, enforceValuePresence = false)
-        }
+        Field.build(fieldName, schema, enforceValuePresence = false).map(Field.normalize(_))
       case TabledEntity.Context =>
         // Must normalize first and add the schema key field after. To avoid unlikely weird issues
         // with similar existing keys.
-        addSchemaVersionKey {
-          Field.normalize {
-            Field.buildRepeated(fieldName, schema, enforceItemPresence = true, Type.Nullability.Nullable)
-          }
-        }
+        Field
+          .buildRepeated(fieldName, schema, enforceItemPresence = true, Type.Nullability.Nullable)
+          .map(Field.normalize(_))
+          .map(addSchemaVersionKey(_))
     }
 
     // Accessors are meaningless for a schema's top-level field
-    field.copy(accessors = Set.empty)
+    field.map(_.copy(accessors = Set.empty))
   }
 
   private def keyToSubVersion(key: SchemaKey): SchemaSubVersion = (key.version.revision, key.version.addition)
@@ -118,11 +120,11 @@ object TypedTabledEntity {
   private def addSchemaVersionKey(field: Field): Field = {
     val fieldType = field.fieldType match {
       case arr @ Type.Array(struct @ Type.Struct(subFields), _) =>
-        val fixedFields = // Our special key takes priority over a key of the same name in the schema
-          Field("_schema_version", Type.String, Type.Nullability.Required) +: subFields.filter(
-            _.name =!= "_schema_version"
-          )
-        arr.copy(element = struct.copy(fields = fixedFields))
+        val head = Field("_schema_version", Type.String, Type.Nullability.Required)
+        val tail = subFields.filter( // Our special key takes priority over a key of the same name in the schema
+          _.name =!= "_schema_version"
+        )
+        arr.copy(element = struct.copy(fields = NonEmptyVector(head, tail)))
       case other =>
         // This is OK. It must be a weird schema, whose root type is not an object.
         // Unlikely but allowed according to our rules.

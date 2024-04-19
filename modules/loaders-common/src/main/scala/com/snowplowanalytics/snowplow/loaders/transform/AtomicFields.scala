@@ -22,8 +22,8 @@ object AtomicFields {
    *
    * Does not include fields added by the loader, e.g. `load_tstamp`
    */
-  val static: List[Field] =
-    List(
+  val static: Vector[Field] =
+    Vector(
       Field("app_id", Type.String, Nullable),
       Field("platform", Type.String, Nullable),
       Field("etl_tstamp", Type.Timestamp, Nullable),
@@ -154,6 +154,6 @@ object AtomicFields {
       Field("true_tstamp", Type.Timestamp, Nullable)
     )
 
-  val withLoadTstamp: List[Field] =
+  val withLoadTstamp: Vector[Field] =
     static :+ Field("load_tstamp", Type.Timestamp, Required)
 }

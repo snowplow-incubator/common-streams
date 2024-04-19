@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.{EitherT, NonEmptyVector}
 import cats.effect.Sync
 import cats.implicits._
 import com.snowplowanalytics.iglu.client.{ClientError, Resolver}
@@ -35,15 +35,15 @@ private[transform] object SchemaProvider {
   def fetchSchemasWithSameModel[F[_]: Sync: RegistryLookup](
     resolver: Resolver[F],
     schemaKey: SchemaKey
-  ): EitherT[F, FailureDetails.LoaderIgluError, NonEmptyList[SelfDescribingSchema[Schema]]] =
+  ): EitherT[F, FailureDetails.LoaderIgluError, NonEmptyVector[SelfDescribingSchema[Schema]]] =
     for {
       schemaKeys <- EitherT(resolver.listSchemasLike(schemaKey))
                       .leftMap(resolverFetchBadRow(schemaKey.vendor, schemaKey.name, schemaKey.format, schemaKey.version.model))
-                      .map(_.schemas)
+                      .map(_.schemas.toVector)
       schemaKeys <- EitherT.rightT[F, FailureDetails.LoaderIgluError](schemaKeys.filter(_ < schemaKey))
       topSchema <- getSchema(resolver, schemaKey)
       lowerSchemas <- schemaKeys.filter(_ < schemaKey).traverse(getSchema(resolver, _))
-    } yield NonEmptyList(topSchema, lowerSchemas)
+    } yield NonEmptyVector(topSchema, lowerSchemas)
 
   private def resolverFetchBadRow(
     vendor: String,

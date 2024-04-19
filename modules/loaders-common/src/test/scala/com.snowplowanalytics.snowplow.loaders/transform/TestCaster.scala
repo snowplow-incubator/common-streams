@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
+import cats.data.NonEmptyVector
 import io.circe.{Json, JsonObject}
 
 import java.time.{Instant, LocalDate}
@@ -24,10 +25,10 @@ object TestCaster extends Caster[Json] {
   override def doubleValue(v: Double): Json   = Json.fromDoubleOrNull(v)
   override def decimalValue(unscaled: BigInt, details: Type.Decimal): Json =
     Json.fromBigDecimal(BigDecimal(unscaled, details.scale))
-  override def timestampValue(v: Instant): Json = Json.fromString(v.toString)
-  override def dateValue(v: LocalDate): Json    = Json.fromString(v.toString)
-  override def arrayValue(vs: List[Json]): Json = Json.fromValues(vs)
-  override def structValue(vs: List[Caster.NamedValue[Json]]): Json =
-    Json.fromJsonObject(JsonObject.fromIterable(vs.map(nv => nv.name -> nv.value)))
+  override def timestampValue(v: Instant): Json   = Json.fromString(v.toString)
+  override def dateValue(v: LocalDate): Json      = Json.fromString(v.toString)
+  override def arrayValue(vs: Vector[Json]): Json = Json.fromValues(vs)
+  override def structValue(vs: NonEmptyVector[Caster.NamedValue[Json]]): Json =
+    Json.fromJsonObject(JsonObject.fromIterable(vs.toVector.map(nv => nv.name -> nv.value)))
 
 }
