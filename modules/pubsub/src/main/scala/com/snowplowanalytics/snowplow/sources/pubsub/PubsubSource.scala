@@ -222,7 +222,9 @@ object PubsubSource {
                         _ <- fiber.join
                       } yield ()
                     }
+      _ <- Resource.eval(Logger[F].info("Waiting for PubSub Subscriber to be up and running...."))
       _ <- Resource.eval(Sync[F].blocking(apiService.awaitRunning()))
+      _ <- Resource.eval(Logger[F].info("PubSub Subscriber is running"))
     } yield ()
 
   private def drainQueue[F[_]: Async](control: Control): F[Unit] =
