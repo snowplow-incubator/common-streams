@@ -28,6 +28,9 @@ import com.typesafe.sbt.site.SiteScaladocPlugin.autoImport._
 import com.github.sbt.git.SbtGit.git
 import com.github.sbt.sbtghpages.GhpagesPlugin.autoImport.ghpagesNoJekyll
 
+// Iglu plugin
+import com.snowplowanalytics.snowplow.sbt.IgluSchemaPlugin.autoImport._
+
 object BuildSettings {
 
   lazy val scala212 = "2.12.18"
@@ -106,5 +109,13 @@ object BuildSettings {
   val ghPagesSettings = Seq(
     git.remoteRepo := "git@github.com:snowplow-incubator/common-streams.git",
     ghpagesNoJekyll := true
+  )
+
+  val igluTestSettings = Seq(
+    Test / igluUris := Seq(
+      // Iglu Central schemas used in tests will get pre-fetched by sbt
+      "iglu:com.snowplowanalytics.iglu/anything-a/jsonschema/1-0-0",
+      "iglu:com.snowplowanalytics.snowplow.media/ad_break_end_event/jsonschema/1-0-0"
+    )
   )
 }

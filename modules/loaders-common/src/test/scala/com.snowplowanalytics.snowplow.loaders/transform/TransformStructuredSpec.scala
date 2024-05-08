@@ -16,6 +16,7 @@ import com.snowplowanalytics.iglu.schemaddl.parquet.{Field, Type}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.{Event, SnowplowEvent}
 import com.snowplowanalytics.snowplow.badrows.{BadRow, Failure, FailureDetails, Processor => BadRowProcessor}
 import com.snowplowanalytics.snowplow.loaders.transform.NonAtomicFields.{ColumnFailure, Result}
+import cats.data.NonEmptyVector
 import io.circe._
 import io.circe.literal._
 import org.specs2.Specification
@@ -28,12 +29,12 @@ import scala.collection.immutable.SortedMap
 class TransformStructuredSpec extends Specification {
 
   private val simpleOneFieldSchema =
-    List(
+    NonEmptyVector.of(
       Field("my_string", Type.String, Required)
     )
 
   private val schemaWithAllPossibleTypes =
-    List(
+    NonEmptyVector.of(
       Field("my_string", Type.String, Required),
       Field("my_int", Type.Integer, Required),
       Field("my_long", Type.Long, Required),
@@ -43,7 +44,7 @@ class TransformStructuredSpec extends Specification {
       Field("my_date", Type.Date, Required),
       Field("my_timestamp", Type.Timestamp, Required),
       Field("my_array", Type.Array(Type.Integer, Required), Required),
-      Field("my_object", Type.Struct(List(Field("abc", Type.String, Required))), Required),
+      Field("my_object", Type.Struct(NonEmptyVector.of(Field("abc", Type.String, Required))), Required),
       Field("my_null", Type.String, Nullable)
     )
 
@@ -86,8 +87,10 @@ class TransformStructuredSpec extends Specification {
     Failures:
       Atomic currency field cannot be cast to a decimal due to rounding $atomicTooManyDecimalPoints
       Atomic currency field cannot be cast to a decimal due to high precision $atomicHighPrecision
-      Missing value for unstruct (null passed in required field) $unstructMissingValue
-      Missing value for context (null passed in required field) $contextMissingValue
+      Missing value for unstruct (missing required field) $unstructMissingValue
+      Missing value for unstruct (null passed in required field) $unstructNullValue
+      Missing value for context (missing required field) $contextMissingValue
+      Missing value for context (null passed in required field) $contextNullValue
       Cast error for unstruct (integer passed in string field) $unstructWrongType
       Cast error for context (integer passed in string field) $contextWrongType
       Iglu error in batch info becomes iglu transformation error $igluErrorInBatchInfo
@@ -422,6 +425,23 @@ class TransformStructuredSpec extends Specification {
 
   def unstructMissingValue = {
     val inputEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+    val batchInfo = Result(
+      fields       = Vector(mySchemaUnstruct(model = 1, subVersions = Set((0, 0)))),
+      igluFailures = List.empty
+    )
+
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
+      SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 0)),
+      value    = json"""null""",
+      expected = "String"
+    )
+
+    assertLoaderError(inputEvent, batchInfo, List(expectedError))
+  }
+
+  def unstructNullValue = {
+    val inputEvent =
       createEvent(unstruct = Some(sdj(data = json"""{ "my_string": null}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
     val batchInfo = Result(
       fields       = Vector(mySchemaUnstruct(model = 1, subVersions = Set((0, 0)))),
@@ -455,6 +475,23 @@ class TransformStructuredSpec extends Specification {
   }
 
   def contextMissingValue = {
+    val inputEvent =
+      createEvent(contexts = List(sdj(data = json"""{}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+    val batchInfo = Result(
+      fields       = Vector(mySchemaContexts(model = 1, subVersions = Set((0, 0)))),
+      igluFailures = List.empty
+    )
+
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
+      SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 0)),
+      value    = json"""null""",
+      expected = "String"
+    )
+
+    assertLoaderError(inputEvent, batchInfo, List(expectedError))
+  }
+
+  def contextNullValue = {
     val inputEvent =
       createEvent(contexts = List(sdj(data = json"""{ "my_string": null}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
     val batchInfo = Result(
@@ -558,7 +595,7 @@ class TransformStructuredSpec extends Specification {
   private def mySchemaUnstruct(
     model: Int,
     subVersions: Set[SchemaSubVersion],
-    ddl: List[Field] = simpleOneFieldSchema
+    ddl: NonEmptyVector[Field] = simpleOneFieldSchema
   ) = TypedTabledEntity(
     tabledEntity   = TabledEntity(TabledEntity.UnstructEvent, "com.example", "mySchema", model),
     mergedField    = Field(s"unstruct_event_com_example_my_schema_$model", Type.Struct(ddl), Nullable, Set.empty),
@@ -569,9 +606,9 @@ class TransformStructuredSpec extends Specification {
   private def mySchemaContexts(
     model: Int,
     subVersions: Set[SchemaSubVersion],
-    ddl: List[Field] = simpleOneFieldSchema
+    ddl: NonEmptyVector[Field] = simpleOneFieldSchema
   ): TypedTabledEntity = {
-    val withSchemaVersion = Field("_schema_version", Type.String, Required) :: ddl
+    val withSchemaVersion = Field("_schema_version", Type.String, Required) +: ddl
     TypedTabledEntity(
       tabledEntity = TabledEntity(TabledEntity.Context, "com.example", "mySchema", model),
       mergedField =

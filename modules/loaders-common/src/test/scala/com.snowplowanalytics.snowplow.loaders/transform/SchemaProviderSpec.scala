@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.data.NonEmptyList
+import cats.data.NonEmptyVector
 import cats.effect.IO
 import io.circe.parser.{parse => parseToJson}
 import scala.io.Source
@@ -38,13 +38,13 @@ class SchemaProviderSpec extends Specification with CatsEffect {
 
   def e1 = {
 
-    val expected = List(
+    val expected = NonEmptyVector.of(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey700).value.map { result =>
-      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
-        schemas.toList must beEqualTo(expected)
+      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
+        schemas must beEqualTo(expected)
       }
     }
 
@@ -52,15 +52,15 @@ class SchemaProviderSpec extends Specification with CatsEffect {
 
   def e2 = {
 
-    val expected = List(
+    val expected = Vector(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700),
       SelfDescribingSchema(SchemaMap(testSchemaKey701), testSchema701),
       SelfDescribingSchema(SchemaMap(testSchemaKey710), testSchema710)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey710).value.map { result =>
-      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
-        schemas.toList must containTheSameElementsAs(expected)
+      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
+        schemas.toVector must containTheSameElementsAs(expected)
       }
     }
 
@@ -68,14 +68,14 @@ class SchemaProviderSpec extends Specification with CatsEffect {
 
   def e3 = {
 
-    val expected = List(
+    val expected = Vector(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700),
       SelfDescribingSchema(SchemaMap(testSchemaKey701), testSchema701)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey701).value.map { result =>
-      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
-        schemas.toList must containTheSameElementsAs(expected)
+      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
+        schemas.toVector must containTheSameElementsAs(expected)
       }
     }
 
