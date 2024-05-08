@@ -1,3 +1,10 @@
+Version 0.6.0 (2024-05-08)
+--------------------------
+Omit parquet field for a schema with no nested fields (#74)
+Disable testcontainers/ryuk in CI (#69)
+Manually fetch Localstack container image before running Kinesis specs (#69)
+Manually fetch container image before running StatsD spec (#69)
+
 Version 0.5.2 (2024-03-26)
 --------------------------
 Bump schema-ddl to 0.22.2
