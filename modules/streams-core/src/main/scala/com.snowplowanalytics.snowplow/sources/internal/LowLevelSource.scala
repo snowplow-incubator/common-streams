@@ -102,7 +102,7 @@ private[sources] object LowLevelSource {
         tokenedSources
           .zip(sinks)
           .map { case (tokenedSource, sink) => sink(tokenedSource) }
-          .parJoin(2) // so we start processing the next window while the previous window is still finishing up.
+          .parJoin(eagerness(config.windowing)) // so we start processing the next window while the previous window is still finishing up.
       }
 
       str.flatten
@@ -191,8 +191,8 @@ private[sources] object LowLevelSource {
       }
       .through(processor)
       .chunks
-      .evalTap(_ => control.waitForPreviousWindow)
       .prefetch // This prefetch means we can ack messages concurrently with processing the next batch
+      .evalTap(_ => control.waitForPreviousWindow)
       .evalMap { chunk =>
         chunk
           .traverse { token =>
@@ -221,6 +221,12 @@ private[sources] object LowLevelSource {
     config match {
       case EventProcessingConfig.NoWindowing      => in => Stream.emit(in)
       case tw: EventProcessingConfig.TimedWindows => timedWindows(tw)
+    }
+
+  private def eagerness(config: EventProcessingConfig.Windowing): Int =
+    config match {
+      case EventProcessingConfig.NoWindowing      => 1
+      case tw: EventProcessingConfig.TimedWindows => tw.numEagerWindows + 1
     }
 
   /**

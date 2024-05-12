@@ -43,15 +43,23 @@ object EventProcessingConfig {
    *   several parallel instances of the app all start at the same time. All instances in the group
    *   should end windows at slightly different times, so that downstream gets a more steady flow of
    *   completed batches.
+   * @param numEagerWindows
+   *   Controls how many windows are allowed to start eagerly ahead of an earlier window that is
+   *   still being finalized. For example, if numEagerWindows=2 then window 42 is allowed to start
+   *   while windows 40 and 41 are still finalizing.
    */
-  case class TimedWindows(duration: FiniteDuration, firstWindowScaling: Double) extends Windowing
+  case class TimedWindows(
+    duration: FiniteDuration,
+    firstWindowScaling: Double,
+    numEagerWindows: Int
+  ) extends Windowing
 
   object TimedWindows {
-    def build[F[_]: Sync](duration: FiniteDuration): F[TimedWindows] =
+    def build[F[_]: Sync](duration: FiniteDuration, numEagerWindows: Int): F[TimedWindows] =
       for {
         random <- Random.scalaUtilRandom
         factor <- random.nextDouble
-      } yield TimedWindows(duration, factor)
+      } yield TimedWindows(duration, factor, numEagerWindows)
   }
 
 }

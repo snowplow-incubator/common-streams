@@ -144,7 +144,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val windowDuration =
       (BatchesPerRebalance - 1) * TimeBetweenBatches - 1.milliseconds // so for each rebalance we get 1 full and 1 incomplete window
-    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0, 2))
 
     val durationToTest =
       (2 * BatchesPerRebalance + 1) * TimeBetweenBatches // so no time to process first window of the 3rd rebalance
@@ -175,7 +175,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val windowDuration =
       (BatchesPerRebalance - 1) * TimeBetweenBatches - 1.milliseconds // so for each rebalance we get 1 full and 1 incomplete window
-    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0, 2))
 
     val durationToTest    = 1.5 * TimeBetweenBatches // Not enough time to finish an entire window
     val expectedNumEvents = 2 * EventsPerBatch // Because the first two batches should be allowed to finish
@@ -204,7 +204,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
   def e6 = {
 
     val windowDuration = 3 * TimeBetweenBatches
-    val config         = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
+    val config         = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0, 2))
 
     val badProcessor: EventProcessor[IO] =
       _.drain ++ Stream.raiseError[IO](new RuntimeException("boom!"))
