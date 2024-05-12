@@ -7,15 +7,16 @@
  */
 package com.snowplowanalytics.snowplow.sources.internal
 
+import cats.implicits._
+import cats.effect.std.Queue
 import cats.effect.IO
 import cats.effect.kernel.{Ref, Unique}
 import cats.effect.testkit.TestControl
 import cats.effect.testing.specs2.CatsEffect
 import fs2.{Chunk, Stream}
 import org.specs2.Specification
-import org.specs2.matcher.Matcher
 
-import scala.concurrent.duration.{Duration, DurationInt}
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import java.nio.charset.StandardCharsets
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
@@ -28,49 +29,78 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
   def is = s2"""
   A LowLevelSource raised to a SourceAndAck should:
     With no windowing of events:
-      process and checkpoint a continuous stream of events with no windowing $e1
-      cleanly checkpoint pending events when a stream is interrupted $e2
+      process and checkpoint a continuous stream of events with no windowing:
+        - when time between batches is longer than the time to process a batch $e1
+        - when time between batches is shorter than the time to process a batch $e2
       not checkpoint events if the event processor throws an exception $e3
 
     With a processor that operates on windows of events:
-      process and checkpoint events in timed windows $e4
-      cleanly checkpoint pending window when a stream is interrupted $e5
-      not checkpoint events if the event processor throws an exception $e6
+      process and checkpoint events in timed windows $windowed1
+      cleanly checkpoint pending window when a stream is interrupted $windowed2
+      not checkpoint events if the event processor throws an exception $windowed3
+      eagerly start windows when previous window is still finalizing $windowed4
 
     When reporting healthy status
-      report healthy when there are no events $e7
-      report lagging if there are unprocessed events $e8
-      report healthy if events are processed but not yet acked (e.g. a batch-oriented loader) $e9
-      report healthy after all events have been processed and acked $e10
-      report disconnected while source is in between two active streams of events (e.g. during kafka rebalance) $e11
+      report healthy when there are no events $health1
+      report lagging if there are unprocessed events $health2
+      report healthy if events are processed but not yet acked (e.g. a batch-oriented loader) $health3
+      report healthy after all events have been processed and acked $health4
+      report disconnected while source is in between two active streams of events (e.g. during kafka rebalance) $health5
   """
 
   def e1 = {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    val numBatchesToTest  = (2.5 * BatchesPerRebalance).toInt // Enough to test two full rebalances
-    val durationToTest    = numBatchesToTest * TimeBetweenBatches
-    val expectedNumEvents = numBatchesToTest * EventsPerBatch
-    val expected          = pureEvents.take(expectedNumEvents.toLong).compile.toList
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 5,
+      eventsPerBatch      = 8,
+      timeBetweenBatches  = 20.seconds,
+      timeToProcessBatch  = 1.second
+    )
 
     val io = for {
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor = testProcessor(refProcessed)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = testProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(durationToTest)
-      checkpointed <- refCheckpoints.get
-      processed <- refProcessed.get
+      _ <- IO.sleep(235.seconds)
       _ <- fiber.cancel
-    } yield (checkpointed must haveSize(numBatchesToTest)) and
-      (checkpointed must eachHaveSize(EventsPerBatch)) and
-      (checkpointed.flatten must beEqualTo(processed)) and
-      (processed must haveSize(expectedNumEvents)) and
-      (processed must beSorted) and
-      (processed must containUniqueStrings) and
-      (processed must beEqualTo(expected))
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.Checkpointed(List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.Checkpointed(List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:40Z", List("17", "18", "19", "20", "21", "22", "23", "24")),
+        Action.Checkpointed(List("17", "18", "19", "20", "21", "22", "23", "24")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:00Z", List("25", "26", "27", "28", "29", "30", "31", "32")),
+        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:20Z", List("33", "34", "35", "36", "37", "38", "39", "40")),
+        Action.Checkpointed(List("33", "34", "35", "36", "37", "38", "39", "40")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("41", "42", "43", "44", "45", "46", "47", "48")),
+        Action.Checkpointed(List("41", "42", "43", "44", "45", "46", "47", "48")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:00Z", List("49", "50", "51", "52", "53", "54", "55", "56")),
+        Action.Checkpointed(List("49", "50", "51", "52", "53", "54", "55", "56")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:20Z", List("57", "58", "59", "60", "61", "62", "63", "64")),
+        Action.Checkpointed(List("57", "58", "59", "60", "61", "62", "63", "64")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:40Z", List("65", "66", "67", "68", "69", "70", "71", "72")),
+        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:00Z", List("73", "74", "75", "76", "77", "78", "79", "80")),
+        Action.Checkpointed(List("73", "74", "75", "76", "77", "78", "79", "80")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:03:20Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:20Z", List("81", "82", "83", "84", "85", "86", "87", "88")),
+        Action.Checkpointed(List("81", "82", "83", "84", "85", "86", "87", "88")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:40Z", List("89", "90", "91", "92", "93", "94", "95", "96")),
+        Action.Checkpointed(List("89", "90", "91", "92", "93", "94", "95", "96")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:55Z")
+      )
+    )
 
     TestControl.executeEmbed(io)
   }
@@ -79,27 +109,34 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    val durationToTest    = 0.5 * TimeToProcessBatch // Not enough time to finish processing the first batch
-    val expectedNumEvents = 1 * EventsPerBatch // Because the first batch should be allowed to finish
-    val expected          = pureEvents.take(expectedNumEvents.toLong).compile.toList
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 100,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 1.seconds, // source is quick to emit more events
+      timeToProcessBatch  = 60.second // processor is slow to sink the events
+    )
 
     val io = for {
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor = testProcessor(refProcessed)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = testProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(durationToTest) // Not enough time to finish processing the first batch
-      _ <- fiber.cancel // This should wait for the first batch to finish processing
-      checkpointed <- refCheckpoints.get
-      processed <- refProcessed.get
-    } yield (checkpointed must haveSize(1)) and
-      (checkpointed.head must haveSize(expectedNumEvents)) and
-      (checkpointed.flatten must beEqualTo(processed)) and
-      (processed must haveSize(expectedNumEvents)) and
-      (processed must beEqualTo(expected))
+      _ <- IO.sleep(90.seconds) // processor will be mid-way through processing second batch
+      _ <- fiber.cancel
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:00Z", List("3", "4")),
+        Action.Checkpointed(List("1", "2")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:00Z", List("5", "6")),
+        Action.Checkpointed(List("3", "4")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:00Z"),
+        Action.Checkpointed(List("5", "6"))
+      )
+    )
 
-    // TODO: check it is cancelled in reasonable time
     TestControl.executeEmbed(io)
   }
 
@@ -107,120 +144,304 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    val errorAfterBatch   = 3
-    val expectedNumEvents = 3 * EventsPerBatch
-    val expected          = pureEvents.take(expectedNumEvents.toLong).compile.toList
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 5,
+      eventsPerBatch      = 8,
+      timeBetweenBatches  = 20.seconds,
+      timeToProcessBatch  = 1.second
+    )
 
-    def badProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] =
-      _.zipWithIndex
-        .evalMap { case (TokenedEvents(events, token, _), batchId) =>
-          if (batchId >= errorAfterBatch)
-            IO.raiseError(new RuntimeException(s"boom! Exceeded $errorAfterBatch batches"))
-          else
-            ref
-              .update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
-              .as(token)
-        }
-
-    val io = for {
-      refProcessed <- Ref[IO].of[List[String]](Nil)
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      processor = badProcessor(refProcessed)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      result <- sourceAndAck.stream(config, processor).compile.drain.attempt
-      checkpointed <- refCheckpoints.get
-      processed <- refProcessed.get
-    } yield (result must beLeft) and
-      (checkpointed must haveSize(errorAfterBatch)) and
-      (checkpointed must eachHaveSize(EventsPerBatch)) and
-      (checkpointed.flatten must beEqualTo(processed)) and
-      (processed must haveSize(expectedNumEvents)) and
-      (processed must beEqualTo(expected))
-
-    TestControl.executeEmbed(io)
-  }
-
-  def e4 = {
-
-    val windowDuration =
-      (BatchesPerRebalance - 1) * TimeBetweenBatches - 1.milliseconds // so for each rebalance we get 1 full and 1 incomplete window
-    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
-
-    val durationToTest =
-      (2 * BatchesPerRebalance + 1) * TimeBetweenBatches // so no time to process first window of the 3rd rebalance
-    val expectedNumEvents  = 2 * BatchesPerRebalance * EventsPerBatch
-    val expectedNumWindows = 4
-    val expected           = pureEvents.take(expectedNumEvents.toLong).compile.toList
+    // A processor that throws an error after the 3rd batch it sees
+    def badProcessor(inner: EventProcessor[IO]): EventProcessor[IO] = { in =>
+      Stream.eval(Queue.synchronous[IO, TokenedEvents]).flatMap { q =>
+        val str = in.zipWithIndex
+          .evalMap { case (tokenedEvents, batchId) =>
+            if (batchId >= 3)
+              IO.raiseError(new RuntimeException(s"boom! Exceeded 3 batches"))
+            else
+              q.offer(tokenedEvents)
+          }
+        inner(Stream.fromQueueUnterminated(q)).concurrently(str)
+      }
+    }
 
     val io = for {
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor = windowedProcessor(refProcessed)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      innerProcessor = testProcessor(refActions, testConfig)
+      processor      = badProcessor(innerProcessor)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(durationToTest)
-      checkpointed <- refCheckpoints.get
+      _ <- IO.sleep(2.days)
       _ <- fiber.cancel
-    } yield (checkpointed must haveSize(expectedNumWindows)) and
-      (checkpointed.head must haveSize((BatchesPerRebalance - 1) * EventsPerBatch)) and
-      (checkpointed.flatten must haveSize(expectedNumEvents)) and
-      (checkpointed.flatten must beSorted) and
-      (checkpointed.flatten must containUniqueStrings) and
-      (checkpointed.flatten must beEqualTo(expected))
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.Checkpointed(List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.Checkpointed(List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:40Z", List("17", "18", "19", "20", "21", "22", "23", "24")),
+        Action.Checkpointed(List("17", "18", "19", "20", "21", "22", "23", "24"))
+      )
+    )
 
     TestControl.executeEmbed(io)
   }
 
-  def e5 = {
+  /** Specs for when the processor works with windows */
 
-    val windowDuration =
-      (BatchesPerRebalance - 1) * TimeBetweenBatches - 1.milliseconds // so for each rebalance we get 1 full and 1 incomplete window
-    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
+  def windowed1 = {
 
-    val durationToTest    = 1.5 * TimeBetweenBatches // Not enough time to finish an entire window
-    val expectedNumEvents = 2 * EventsPerBatch // Because the first two batches should be allowed to finish
-    val expected          = pureEvents.take(expectedNumEvents.toLong).compile.toList
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(45.seconds, 1.0, 2))
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 5,
+      eventsPerBatch      = 8,
+      timeBetweenBatches  = 20.seconds,
+      timeToProcessBatch  = 1.second
+    )
 
     val io = for {
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      refProcessed <- Ref[IO].of[List[String]](Nil)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      processor = windowedProcessor(refProcessed)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = windowedProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(durationToTest) // Not enough time to finish processing the first batch
-      _ <- fiber.cancel // This should wait for the first batch to finish processing
-      checkpointed <- refCheckpoints.get
-      processed <- refProcessed.get
-    } yield (checkpointed must haveSize(1)) and
-      (checkpointed.head must haveSize(expectedNumEvents)) and
-      (checkpointed.flatten must beEqualTo(processed)) and
-      (processed must haveSize(expectedNumEvents)) and
-      (processed must beEqualTo(expected))
+      _ <- IO.sleep(235.seconds)
+      _ <- fiber.cancel
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:40Z", List("17", "18", "19", "20", "21", "22", "23", "24")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:45Z"),
+        Action.Checkpointed(
+          List(
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23",
+            "24"
+          )
+        ),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:00Z", List("25", "26", "27", "28", "29", "30", "31", "32")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:20Z", List("33", "34", "35", "36", "37", "38", "39", "40")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
+        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40")),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("41", "42", "43", "44", "45", "46", "47", "48")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:00Z", List("49", "50", "51", "52", "53", "54", "55", "56")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:20Z", List("57", "58", "59", "60", "61", "62", "63", "64")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:02:25Z"),
+        Action.Checkpointed(
+          List(
+            "41",
+            "42",
+            "43",
+            "44",
+            "45",
+            "46",
+            "47",
+            "48",
+            "49",
+            "50",
+            "51",
+            "52",
+            "53",
+            "54",
+            "55",
+            "56",
+            "57",
+            "58",
+            "59",
+            "60",
+            "61",
+            "62",
+            "63",
+            "64"
+          )
+        ),
+        Action.ProcessorStartedWindow("1970-01-01T00:02:40Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:40Z", List("65", "66", "67", "68", "69", "70", "71", "72")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:00Z", List("73", "74", "75", "76", "77", "78", "79", "80")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
+        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80")),
+        Action.ProcessorStartedWindow("1970-01-01T00:03:20Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:20Z", List("81", "82", "83", "84", "85", "86", "87", "88")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:03:40Z", List("89", "90", "91", "92", "93", "94", "95", "96")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:55Z"),
+        Action.Checkpointed(List("81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96"))
+      )
+    )
 
-    // TODO: check it is cancelled in reasonable time
     TestControl.executeEmbed(io)
   }
 
-  def e6 = {
+  def windowed2 = {
 
-    val windowDuration = 3 * TimeBetweenBatches
-    val config         = EventProcessingConfig(EventProcessingConfig.TimedWindows(windowDuration, 1.0))
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(45.seconds, 1.0, 2))
 
-    val badProcessor: EventProcessor[IO] =
-      _.drain ++ Stream.raiseError[IO](new RuntimeException("boom!"))
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 5,
+      timeBetweenBatches  = 0.seconds,
+      timeToProcessBatch  = 21.seconds // Time to process a batch is fairly slow
+    )
 
     val io = for {
-      refCheckpoints <- Ref[IO].of[List[List[String]]](Nil)
-      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refCheckpoints))
-      result <- sourceAndAck.stream(config, badProcessor).compile.drain.attempt
-      checkpointed <- refCheckpoints.get
-    } yield (result must beLeft) and
-      (checkpointed must beEmpty)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = windowedProcessor(refActions, testConfig)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(30.seconds) // Mid-way through processing second batch
+      _ <- fiber.cancel
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2", "3", "4", "5")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:21Z", List("6", "7", "8", "9", "10")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:42Z", List("11", "12", "13", "14", "15")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:03Z"),
+        Action.Checkpointed(List("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"))
+      )
+    )
 
     TestControl.executeEmbed(io)
   }
 
-  def e7 = {
+  def windowed3 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(10.minutes, 1.0, 2))
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 5,
+      eventsPerBatch      = 8,
+      timeBetweenBatches  = 20.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    // A processor that throws an error after the 3rd batch it sees
+    def badProcessor(inner: EventProcessor[IO]): EventProcessor[IO] = { in =>
+      Stream.eval(Queue.synchronous[IO, TokenedEvents]).flatMap { q =>
+        val str = in.zipWithIndex
+          .evalMap { case (tokenedEvents, batchId) =>
+            if (batchId >= 3)
+              IO.raiseError(new RuntimeException(s"boom! Exceeded 3 batches"))
+            else
+              q.offer(tokenedEvents)
+          }
+        inner(Stream.fromQueueUnterminated(q)).concurrently(str)
+      }
+    }
+
+    val io = for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      innerProcessor = windowedProcessor(refActions, testConfig)
+      processor      = badProcessor(innerProcessor)
+      _ <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(2.days)
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2", "3", "4", "5", "6", "7", "8")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("9", "10", "11", "12", "13", "14", "15", "16")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:40Z", List("17", "18", "19", "20", "21", "22", "23", "24"))
+      )
+    )
+
+    TestControl.executeEmbed(io)
+  }
+
+  def windowed4 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(10.seconds, 1.0, numEagerWindows = 4))
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance  = Int.MaxValue,
+      eventsPerBatch       = 2,
+      timeBetweenBatches   = 8.seconds,
+      timeToProcessBatch   = 1.second,
+      timeToFinalizeWindow = 90.seconds
+    )
+
+    val io = for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = windowedProcessor(refActions, testConfig)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(118.seconds)
+      _ <- fiber.cancel
+      result <- refActions.get
+    } yield result must beEqualTo(
+      Vector(
+        Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:08Z", List("3", "4")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:10Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:00:16Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:16Z", List("5", "6")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:24Z", List("7", "8")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:26Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:00:32Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:32Z", List("9", "10")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:40Z", List("11", "12")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:42Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:00:48Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:48Z", List("13", "14")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:00:56Z", List("15", "16")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:58Z"),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:04Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:04Z", List("17", "18")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:12Z", List("19", "20")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:14Z"),
+        Action.Checkpointed(List("1", "2", "3", "4")),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("21", "22")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:48Z", List("23", "24")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:50Z"),
+        Action.Checkpointed(List("5", "6", "7", "8")),
+        Action.ProcessorStartedWindow("1970-01-01T00:01:56Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:56Z", List("25", "26")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:58Z"),
+        Action.Checkpointed(List("9", "10", "11", "12")),
+        Action.Checkpointed(List("13", "14", "15", "16")),
+        Action.Checkpointed(List("17", "18", "19", "20")),
+        Action.Checkpointed(List("21", "22", "23", "24")),
+        Action.Checkpointed(List("25", "26"))
+      )
+    )
+
+    TestControl.executeEmbed(io)
+  }
+
+  /** Specs for health check */
+
+  def health1 = {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
@@ -231,38 +452,33 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     }
 
     val io = for {
-      refProcessed <- Ref[IO].of[List[String]](Nil)
+      refActions <- Ref[IO].of(Vector.empty[Action])
       sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
-      processor = testProcessor(refProcessed)
+      processor = testProcessor(refActions, TestSourceConfig(1, 1, 1.second, 1.second))
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(1.hour)
-      health <- sourceAndAck.isHealthy(Duration.Zero)
+      health <- sourceAndAck.isHealthy(1.nanosecond)
       _ <- fiber.cancel
     } yield health must beEqualTo(SourceAndAck.Healthy)
 
     TestControl.executeEmbed(io)
   }
 
-  def e8 = {
+  def health2 = {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    // A source that repeatedly emits a batch
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
-      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
-      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Chunk.empty, (), None)).repeat
-      }
-    }
-
-    // A processor which takes 1 hour to process each batch
-    val processor: EventProcessor[IO] =
-      _.evalMap { case TokenedEvents(_, token, _) =>
-        IO.sleep(1.hour).as(token)
-      }
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 0.second,
+      timeToProcessBatch  = 1.hour // Processor is very slow to sink the events
+    )
 
     val io = for {
-      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = testProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(5.minutes)
       health <- sourceAndAck.isHealthy(10.seconds)
@@ -272,53 +488,45 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
-  def e9 = {
+  def health3 = {
 
-    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(1.hour, 1.0, 2))
 
-    // A source that repeatedly emits a batch
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
-      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
-      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Chunk.empty, (), None)).repeat
-      }
-    }
-
-    // A processor which takes 1 minute to process each batch, but does not emit the token (i.e. does not ack the batch)
-    val processor: EventProcessor[IO] =
-      _.evalMap(_ => IO.sleep(1.minute)).drain.covaryOutput
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 1.second,
+      timeToProcessBatch  = 1.second
+    )
 
     val io = for {
-      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = windowedProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(342.seconds)
-      health <- sourceAndAck.isHealthy(90.seconds)
+      _ <- IO.sleep(30.minutes)
+      health <- sourceAndAck.isHealthy(5.seconds)
       _ <- fiber.cancel
     } yield health must beEqualTo(SourceAndAck.Healthy)
 
     TestControl.executeEmbed(io)
   }
 
-  def e10 = {
+  def health4 = {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
-    // A source that emits one batch and then nothing forevermore
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
-      def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
-      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit {
-        Stream.emit(LowLevelEvents(Chunk.empty, (), None)) ++ Stream.never[IO]
-      }
-    }
-
-    // A processor which takes 1 minute to process each batch
-    val processor: EventProcessor[IO] =
-      _.evalMap { case TokenedEvents(_, token, _) =>
-        IO.sleep(1.minute).as(token)
-      }
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = 1,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 100000.days, // Near-infinite pause after emitting the first batch
+      timeToProcessBatch  = 1.second
+    )
 
     val io = for {
-      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = testProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(5.minutes)
       health <- sourceAndAck.isHealthy(1.microsecond)
@@ -328,7 +536,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
-  def e11 = {
+  def health5 = {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
 
@@ -341,14 +549,10 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         }
     }
 
-    // A processor which takes 5 seconds to process each batch
-    val processor: EventProcessor[IO] =
-      _.evalMap { case TokenedEvents(_, token, _) =>
-        IO.sleep(5.seconds).as(token)
-      }
-
     val io = for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
       sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      processor = testProcessor(refActions, TestSourceConfig(1, 1, 1.second, 1.second))
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
       _ <- IO.sleep(2.minutes)
       health <- sourceAndAck.isHealthy(1.microsecond)
@@ -358,21 +562,26 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
-  def containUniqueStrings: Matcher[Seq[String]] = { (items: Seq[String]) =>
-    (items.toSet.size == items.size, s"$items contains non-unique values")
-  }
-
-  def eachHaveSize(expected: Int): Matcher[Seq[Seq[String]]] = { (items: Seq[Seq[String]]) =>
-    (items.forall(_.size == expected), s"$items contains items that do not have length $expected")
-  }
 }
 
 object LowLevelSourceSpec {
 
-  val EventsPerBatch      = 8
-  val BatchesPerRebalance = 5
-  val TimeBetweenBatches  = 20.seconds
-  val TimeToProcessBatch  = 1.second
+  sealed trait Action
+
+  object Action {
+    case class ProcessorStartedWindow(timestamp: String) extends Action
+    case class ProcessorReachedEndOfWindow(timestamp: String) extends Action
+    case class ProcessorReceivedEvents(timestamp: String, events: List[String]) extends Action
+    case class Checkpointed(events: List[String]) extends Action
+  }
+
+  case class TestSourceConfig(
+    batchesPerRebalance: Int,
+    eventsPerBatch: Int,
+    timeBetweenBatches: FiniteDuration,
+    timeToProcessBatch: FiniteDuration,
+    timeToFinalizeWindow: FiniteDuration = 0.seconds
+  )
 
   /**
    * An EventProcessor which:
@@ -380,13 +589,22 @@ object LowLevelSourceSpec {
    *   - Records what events it received
    *   - Emits the checkpointing tokens immediately
    */
-  def testProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] =
-    _.evalMap { case TokenedEvents(events, token, _) =>
+  def testProcessor(ref: Ref[IO, Vector[Action]], config: TestSourceConfig): EventProcessor[IO] = { in =>
+    val start = IO.realTimeInstant.flatMap(t => ref.update(_ :+ Action.ProcessorStartedWindow(t.toString)))
+    val end   = IO.realTimeInstant.flatMap(t => ref.update(_ :+ Action.ProcessorReachedEndOfWindow(t.toString)))
+
+    val middle = in.evalMap { case TokenedEvents(events, token, _) =>
+      val deserialized = events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList
       for {
-        _ <- IO.sleep(TimeToProcessBatch)
-        _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
+        now <- IO.realTimeInstant
+        _ <- ref.update(_ :+ Action.ProcessorReceivedEvents(now.toString, deserialized))
+        _ <- IO.sleep(config.timeToProcessBatch)
       } yield token
     }
+
+    Stream.eval(start).drain ++ middle ++ Stream.eval(end).drain
+
+  }
 
   /**
    * An EventProcessor which:
@@ -394,16 +612,27 @@ object LowLevelSourceSpec {
    *   - Records what events it received
    *   - Delays emitting the checkpointing tokens until the end of the window
    */
-  def windowedProcessor(ref: Ref[IO, List[String]]): EventProcessor[IO] = { in =>
+  def windowedProcessor(ref: Ref[IO, Vector[Action]], config: TestSourceConfig): EventProcessor[IO] = { in =>
     Stream.eval(Ref[IO].of[List[Unique.Token]](Nil)).flatMap { checkpoints =>
-      val out = in.evalMap { case TokenedEvents(events, token, _) =>
+      val start = IO.realTimeInstant.flatMap(t => ref.update(_ :+ Action.ProcessorStartedWindow(t.toString)))
+      val end = for {
+        t <- IO.realTimeInstant
+        _ <- ref.update(_ :+ Action.ProcessorReachedEndOfWindow(t.toString))
+        _ <- IO.sleep(config.timeToFinalizeWindow)
+        tokens <- checkpoints.get
+      } yield tokens.reverse
+
+      val middle = in.evalMap { case TokenedEvents(events, token, _) =>
+        val deserialized = events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList
         for {
-          _ <- IO.sleep(TimeToProcessBatch)
-          _ <- ref.update(_ ::: events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString).toList)
+          now <- IO.realTimeInstant
+          _ <- ref.update(_ :+ Action.ProcessorReceivedEvents(now.toString, deserialized))
           _ <- checkpoints.update(token :: _)
+          _ <- IO.sleep(config.timeToProcessBatch)
         } yield ()
       }
-      out.drain ++ Stream.eval(checkpoints.get).flatMap(cs => Stream.emits(cs.reverse))
+
+      Stream.eval(start).drain ++ middle.drain ++ Stream.eval(end).flatMap(Stream.emits(_))
     }
   }
 
@@ -414,36 +643,32 @@ object LowLevelSourceSpec {
    *   - It "rebalances" (like Kafka) after every few batches, which means it emits a new stream
    *   - It uses a ref to record which events got checkpointed
    */
-  def testLowLevelSource(ref: Ref[IO, List[List[String]]]): LowLevelSource[IO, List[String]] =
+  def testLowLevelSource(ref: Ref[IO, Vector[Action]], config: TestSourceConfig): LowLevelSource[IO, List[String]] =
     new LowLevelSource[IO, List[String]] {
       def checkpointer: Checkpointer[IO, List[String]] = Checkpointer.acksOnly[IO, List[String]] { toCheckpoint =>
-        ref.update(_ :+ toCheckpoint)
+        IO.sleep(1.nanos) *>
+          ref.update(_ :+ Action.Checkpointed(toCheckpoint))
       }
 
       def stream: Stream[IO, Stream[IO, LowLevelEvents[List[String]]]] =
-        Stream.range(1, Int.MaxValue).map { rebalanceId =>
-          Stream.range(1, BatchesPerRebalance + 1).flatMap { batchId =>
-            val events = (1 to EventsPerBatch)
-              .map(eventId => s"rebalance $rebalanceId - batch $batchId - event $eventId")
-            val asBytes = Chunk
-              .from(events)
-              .map(_.getBytes(StandardCharsets.UTF_8))
-              .map(ByteBuffer.wrap)
-            Stream.emit(LowLevelEvents(events = asBytes, ack = events.toList, earliestSourceTstamp = None)) ++ Stream
-              .sleep[IO](TimeBetweenBatches)
-              .drain
+        Stream.eval(Ref[IO].of(0)).flatMap { counter =>
+          Stream.unit.repeat.map { _ =>
+            Stream
+              .eval {
+                (1 to config.eventsPerBatch).toList
+                  .traverse(_ => counter.updateAndGet(_ + 1))
+                  .map { numbers =>
+                    val events  = numbers.map(_.toString)
+                    val asBytes = Chunk.from(events).map(e => ByteBuffer.wrap(e.getBytes(StandardCharsets.UTF_8)))
+                    LowLevelEvents(events = asBytes, ack = events.toList, earliestSourceTstamp = None)
+                  }
+              }
+              .flatMap { e =>
+                Stream.emit(e) ++ Stream.sleep[IO](config.timeBetweenBatches).drain
+              }
+              .repeatN(config.batchesPerRebalance.toLong)
           }
         }
-    }
-
-  def pureEvents: Stream[fs2.Pure, String] =
-    Stream.range(1, Int.MaxValue).flatMap { rebalanceId =>
-      Stream.iterable {
-        for {
-          batchId <- 1 to BatchesPerRebalance
-          eventId <- 1 to EventsPerBatch
-        } yield s"rebalance $rebalanceId - batch $batchId - event $eventId"
-      }
     }
 
 }
