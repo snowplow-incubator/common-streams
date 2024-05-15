@@ -272,7 +272,9 @@ private[sources] object LowLevelSource {
           val pull = for {
             _ <- Pull.eval(Logger[F].info(s"Opening first window with randomly adjusted duration of $timeout"))
             _ <- timedPull.timeout(timeout)
-          } yield go(timedPull, None)
+            q <- Pull.eval(Queue.synchronous[F, Option[A]])
+            _ <- Pull.output1(Stream.fromQueueNoneTerminated(q))
+          } yield go(timedPull, Some(q))
           pull.flatten
         }
         .stream
