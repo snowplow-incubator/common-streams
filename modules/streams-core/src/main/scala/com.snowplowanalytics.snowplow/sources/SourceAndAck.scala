@@ -73,8 +73,17 @@ object SourceAndAck {
    */
   case class LaggingEventProcessor(latency: FiniteDuration) extends Unhealthy
 
+  /**
+   * The health status expected if the source of events has been inactive for some time
+   *
+   * @param duration
+   *   How long the source of events has been inactive
+   */
+  case class InactiveSource(duration: FiniteDuration) extends Unhealthy
+
   implicit def showUnhealthy: Show[Unhealthy] = Show {
     case Disconnected                   => "No connection to a source of events"
     case LaggingEventProcessor(latency) => show"Processing latency is $latency"
+    case InactiveSource(duration)       => show"Source of events has been inactive for $duration"
   }
 }

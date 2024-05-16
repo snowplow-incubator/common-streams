@@ -46,6 +46,13 @@ private[sources] trait LowLevelSource[F[_], C] {
    */
   def stream: Stream[F, Stream[F, LowLevelEvents[C]]]
 
+  /**
+   * The last time this source was known to be alive and healthy
+   *
+   * The returned value is FiniteDuration since the unix epoch, i.e. the value returned by
+   * `Sync[F].realTime`
+   */
+  def lastLiveness: F[FiniteDuration]
 }
 
 private[sources] object LowLevelSource {
@@ -109,11 +116,13 @@ private[sources] object LowLevelSource {
     }
 
     def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus] =
-      (isConnectedRef.get, latencyRef.get, Sync[F].realTime).mapN {
-        case (false, _, _) =>
+      (isConnectedRef.get, latencyRef.get, source.lastLiveness, Sync[F].realTime).mapN {
+        case (false, _, _, _) =>
           SourceAndAck.Disconnected
-        case (_, Some(lastPullTime), now) if now - lastPullTime > maxAllowedProcessingLatency =>
+        case (_, Some(lastPullTime), _, now) if now - lastPullTime > maxAllowedProcessingLatency =>
           SourceAndAck.LaggingEventProcessor(now - lastPullTime)
+        case (_, _, lastLiveness, now) if now - lastLiveness > maxAllowedProcessingLatency =>
+          SourceAndAck.InactiveSource(now - lastLiveness)
         case _ => SourceAndAck.Healthy
       }
   }

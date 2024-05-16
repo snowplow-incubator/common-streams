@@ -20,6 +20,7 @@ import scala.reflect._
 
 import java.nio.ByteBuffer
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 // kafka
 import fs2.kafka._
@@ -49,6 +50,9 @@ object KafkaSource {
 
       def stream: Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
         kafkaStream(config, authHandlerClass)
+
+      def lastLiveness: F[FiniteDuration] =
+        Sync[F].realTime
     }
 
   case class OffsetAndCommit[F[_]](offset: Long, commit: F[Unit])

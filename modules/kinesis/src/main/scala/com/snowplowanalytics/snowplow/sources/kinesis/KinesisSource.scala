@@ -7,8 +7,9 @@
  */
 package com.snowplowanalytics.snowplow.sources.kinesis
 
-import cats._
-import cats.effect.{Async, Resource, Sync}
+import cats.{Applicative, Semigroup}
+import cats.effect.{Async, Ref, Resource, Sync}
+import cats.effect.implicits._
 import cats.implicits._
 import fs2.Stream
 import fs2.aws.kinesis.{CommittableRecord, Kinesis, KinesisConsumerSettings}
@@ -25,6 +26,7 @@ import software.amazon.kinesis.common.{InitialPositionInStream, InitialPositionI
 import java.net.URI
 import java.util.Date
 import java.util.concurrent.Semaphore
+import scala.concurrent.duration.FiniteDuration
 
 // kinesis
 import software.amazon.kinesis.common.ConfigsBuilder
@@ -43,8 +45,10 @@ object KinesisSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Parallel: Async](config: KinesisSourceConfig): F[SourceAndAck[F]] =
-    LowLevelSource.toSourceAndAck(lowLevel(config))
+  def build[F[_]: Async](config: KinesisSourceConfig): F[SourceAndAck[F]] =
+    Ref.ofEffect(Sync[F].realTime).flatMap { livenessRef =>
+      LowLevelSource.toSourceAndAck(lowLevel(config, livenessRef))
+    }
 
   private type KinesisCheckpointer[F[_]] = Checkpointer[F, Map[String, KinesisMetadata[F]]]
 
@@ -61,12 +65,18 @@ object KinesisSource {
     ack: F[Unit]
   )
 
-  private def lowLevel[F[_]: Parallel: Async](config: KinesisSourceConfig): LowLevelSource[F, Map[String, KinesisMetadata[F]]] =
+  private def lowLevel[F[_]: Async](
+    config: KinesisSourceConfig,
+    livenessRef: Ref[F, FiniteDuration]
+  ): LowLevelSource[F, Map[String, KinesisMetadata[F]]] =
     new LowLevelSource[F, Map[String, KinesisMetadata[F]]] {
       def checkpointer: KinesisCheckpointer[F] = kinesisCheckpointer[F]
 
       def stream: Stream[F, Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]]] =
-        Stream.emit(kinesisStream(config))
+        Stream.emit(kinesisStream(config, livenessRef))
+
+      def lastLiveness: F[FiniteDuration] =
+        livenessRef.get
     }
 
   private implicit def metadataSemigroup[F[_]]: Semigroup[KinesisMetadata[F]] = new Semigroup[KinesisMetadata[F]] {
@@ -74,7 +84,7 @@ object KinesisSource {
       if (x.sequenceNumber > y.sequenceNumber) x else y
   }
 
-  private def kinesisCheckpointer[F[_]: Parallel: Sync]: KinesisCheckpointer[F] = new KinesisCheckpointer[F] {
+  private def kinesisCheckpointer[F[_]: Async]: KinesisCheckpointer[F] = new KinesisCheckpointer[F] {
     def combine(x: Map[String, KinesisMetadata[F]], y: Map[String, KinesisMetadata[F]]): Map[String, KinesisMetadata[F]] =
       x |+| y
 
@@ -112,44 +122,36 @@ object KinesisSource {
     def nack(c: Map[String, KinesisMetadata[F]]): F[Unit] = Applicative[F].unit
   }
 
-  private def kinesisStream[F[_]: Async](config: KinesisSourceConfig): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] = {
-    val resources =
-      for {
-        region <- Resource.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
-        consumerSettings <- Resource.pure[F, KinesisConsumerSettings](
-                              KinesisConsumerSettings(
-                                config.streamName,
-                                config.appName,
-                                region,
-                                bufferSize = config.bufferSize
-                              )
-                            )
-        kinesisClient <- mkKinesisClient[F](region, config.customEndpoint)
-        dynamoClient <- mkDynamoDbClient[F](region, config.dynamodbCustomEndpoint)
-        cloudWatchClient <- mkCloudWatchClient[F](region, config.cloudwatchCustomEndpoint)
-        kinesis <- Resource.pure[F, Kinesis[F]](
-                     Kinesis.create(scheduler(kinesisClient, dynamoClient, cloudWatchClient, config, _))
-                   )
-      } yield (consumerSettings, kinesis)
-
-    Stream
-      .resource(resources)
-      .flatMap { case (settings, kinesis) =>
-        kinesis.readFromKinesisStream(settings)
-      }
-      .chunks
-      .filter(_.nonEmpty)
-      .map { chunk =>
-        val ack = chunk.asSeq
-          .groupBy(_.shardId)
-          .map { case (k, records) =>
-            k -> records.maxBy(_.sequenceNumber).toMetadata[F]
-          }
-          .toMap
-        val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).min
-        LowLevelEvents(chunk.map(_.record.data()), ack, Some(earliestTstamp))
-      }
-  }
+  private def kinesisStream[F[_]: Async](
+    config: KinesisSourceConfig,
+    livenessRef: Ref[F, FiniteDuration]
+  ): Stream[F, LowLevelEvents[Map[String, KinesisMetadata[F]]]] =
+    for {
+      region <- Stream.eval(Sync[F].delay((new DefaultAwsRegionProviderChain).getRegion))
+      consumerSettings = KinesisConsumerSettings(
+                           config.streamName,
+                           config.appName,
+                           region,
+                           bufferSize = config.bufferSize
+                         )
+      kinesisClient <- Stream.resource(mkKinesisClient[F](region, config.customEndpoint))
+      dynamoClient <- Stream.resource(mkDynamoDbClient[F](region, config.dynamodbCustomEndpoint))
+      cloudWatchClient <- Stream.resource(mkCloudWatchClient[F](region, config.cloudwatchCustomEndpoint))
+      kinesis = Kinesis.create(scheduler(kinesisClient, dynamoClient, cloudWatchClient, config, _))
+      chunk <- kinesis.readChunkedFromKinesisStream(consumerSettings)
+      now <- Stream.eval(Sync[F].realTime)
+      _ <- Stream.eval(livenessRef.set(now))
+      if chunk.nonEmpty
+    } yield {
+      val ack = chunk.asSeq
+        .groupBy(_.shardId)
+        .map { case (k, records) =>
+          k -> records.maxBy(_.sequenceNumber).toMetadata[F]
+        }
+        .toMap
+      val earliestTstamp = chunk.iterator.map(_.record.approximateArrivalTimestamp).min
+      LowLevelEvents(chunk.map(_.record.data()), ack, Some(earliestTstamp))
+    }
 
   private def initialPositionOf(config: KinesisSourceConfig.InitialPosition): InitialPositionInStreamExtended =
     config match {
@@ -195,13 +197,18 @@ object KinesisSource {
         configsBuilder.leaseManagementConfig
           .failoverTimeMillis(kinesisConfig.leaseDuration.toMillis)
 
+      // We ask to see empty batches, so that we can update the health check even when there are no records in the stream
+      val processorConfig =
+        configsBuilder.processorConfig
+          .callProcessRecordsEvenForEmptyRecordList(true)
+
       new Scheduler(
         configsBuilder.checkpointConfig,
         configsBuilder.coordinatorConfig,
         leaseManagementConfig,
         configsBuilder.lifecycleConfig,
         configsBuilder.metricsConfig.metricsLevel(MetricsLevel.NONE),
-        configsBuilder.processorConfig,
+        processorConfig,
         retrievalConfig
       )
     }

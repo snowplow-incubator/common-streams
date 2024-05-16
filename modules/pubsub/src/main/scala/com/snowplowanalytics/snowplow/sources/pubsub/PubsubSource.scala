@@ -61,6 +61,9 @@ object PubsubSource {
 
       def stream: Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
         pubsubStream(config)
+
+      def lastLiveness: F[FiniteDuration] =
+        Sync[F].realTime
     }
 
   private def pubsubCheckpointer[F[_]: Async]: PubSubCheckpointer[F] = new PubSubCheckpointer[F] {

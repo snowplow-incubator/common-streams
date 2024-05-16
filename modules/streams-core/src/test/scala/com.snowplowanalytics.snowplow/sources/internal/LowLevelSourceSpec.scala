@@ -47,6 +47,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       report healthy if events are processed but not yet acked (e.g. a batch-oriented loader) $health3
       report healthy after all events have been processed and acked $health4
       report disconnected while source is in between two active streams of events (e.g. during kafka rebalance) $health5
+      report unhealthy if the underlying low level source is lagging $health6
   """
 
   def e1 = {
@@ -501,6 +502,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val lowLevelSource = new LowLevelSource[IO, Unit] {
       def checkpointer: Checkpointer[IO, Unit]                 = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit(Stream.never[IO])
+      def lastLiveness: IO[FiniteDuration]                     = IO.realTime
     }
 
     val io = for {
@@ -599,6 +601,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Stream.fixedDelay[IO](5.minutes).map { _ =>
           Stream.emit(LowLevelEvents(Chunk.empty, (), None))
         }
+      def lastLiveness: IO[FiniteDuration] = IO.realTime
     }
 
     val io = for {
@@ -614,6 +617,28 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
+  def health6 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit]                 = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit(Stream.never[IO])
+      def lastLiveness: IO[FiniteDuration]                     = IO.realTime.map(_ - 10.seconds)
+    }
+
+    val io = for {
+      refProcessed <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      processor = testProcessor(refProcessed, TestSourceConfig(1, 1, 1.second, 1.second))
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(5.minutes)
+      health <- sourceAndAck.isHealthy(5.seconds)
+      _ <- fiber.cancel
+    } yield health must beEqualTo(SourceAndAck.InactiveSource(10.seconds))
+
+    TestControl.executeEmbed(io)
+  }
 }
 
 object LowLevelSourceSpec {
@@ -721,6 +746,7 @@ object LowLevelSourceSpec {
               .repeatN(config.batchesPerRebalance.toLong)
           }
         }
+      def lastLiveness: IO[FiniteDuration] = IO.realTime
     }
 
 }
