@@ -17,7 +17,7 @@ import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 
 case class PubsubSourceConfig(
   subscription: PubsubSourceConfig.Subscription,
-  parallelPullCount: Int,
+  parallelPullFactor: BigDecimal,
   bufferMaxBytes: Int,
   maxAckExtensionPeriod: FiniteDuration,
   minDurationPerAckExtension: FiniteDuration,
