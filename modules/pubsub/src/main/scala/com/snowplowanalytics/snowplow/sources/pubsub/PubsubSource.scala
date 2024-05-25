@@ -186,8 +186,9 @@ object PubsubSource {
 
   private def runSubscriber[F[_]: Async](config: PubsubSourceConfig, control: Control): Resource[F, Unit] =
     for {
-      executor <- executorResource(Sync[F].delay(Executors.newScheduledThreadPool(2 * config.parallelPullCount)))
       direct <- executorResource(Sync[F].delay(MoreExecutors.newDirectExecutorService()))
+      parallelPullCount = chooseNumParallelPulls(config)
+      executor <- executorResource(Sync[F].delay(Executors.newScheduledThreadPool(2 * parallelPullCount)))
       receiver = messageReceiver(config, control)
       name     = ProjectSubscriptionName.of(config.subscription.projectId, config.subscription.subscriptionId)
       subscriber <- Resource.eval(Sync[F].delay {
@@ -196,7 +197,7 @@ object PubsubSource {
                         .setMaxAckExtensionPeriod(convertDuration(config.maxAckExtensionPeriod))
                         .setMaxDurationPerAckExtension(convertDuration(config.maxDurationPerAckExtension))
                         .setMinDurationPerAckExtension(convertDuration(config.minDurationPerAckExtension))
-                        .setParallelPullCount(config.parallelPullCount)
+                        .setParallelPullCount(parallelPullCount)
                         .setExecutorProvider(FixedExecutorProvider.create(executorForEventCallbacks(direct, executor)))
                         .setSystemExecutorProvider(FixedExecutorProvider.create(executor))
                         .setFlowControlSettings {
@@ -310,4 +311,17 @@ object PubsubSource {
 
   private def convertDuration(d: FiniteDuration): ThreetenDuration =
     ThreetenDuration.ofMillis(d.toMillis)
+
+  /**
+   * Converts `parallelPullFactor` to a suggested number of parallel pulls
+   *
+   * For bigger instances (more cores) the downstream processor can typically process events more
+   * quickly. So the PubSub subscriber needs more parallelism in order to keep downstream saturated
+   * with events.
+   */
+  private def chooseNumParallelPulls(config: PubsubSourceConfig): Int =
+    (Runtime.getRuntime.availableProcessors * config.parallelPullFactor)
+      .setScale(0, BigDecimal.RoundingMode.UP)
+      .toInt
+
 }
