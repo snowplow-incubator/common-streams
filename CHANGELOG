@@ -1,3 +1,10 @@
+Version 0.7.0 (2024-05-29)
+--------------------------
+Kinesis source must report its latency when KCL is not healthy (#77)
+PubSub source scale the parallel pull count with number of cores (#78)
+Fix randomly adjusted first window size (#79)
+Eagerness of windows should be configurable (#76)
+
 Version 0.6.0 (2024-05-08)
 --------------------------
 Omit parquet field for a schema with no nested fields (#74)
