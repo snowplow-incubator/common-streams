@@ -24,12 +24,10 @@ object Dependencies {
     val betterMonadicFor = "0.3.1"
     val kindProjector    = "0.13.2"
     val collectionCompat = "2.11.0"
-    val refined          = "0.11.1"
 
     // Streams
     val fs2Kafka      = "3.4.0"
     val pubsub        = "1.127.3"
-    val fs2AwsKinesis = "4.1.0"
     val awsSdk2       = "2.25.16"
     val kinesisClient = "2.5.7"
 
@@ -67,18 +65,14 @@ object Dependencies {
   val betterMonadicFor  = "com.olegpy"             %% "better-monadic-for"      % V.betterMonadicFor
   val kindProjector     = "org.typelevel"          %% "kind-projector"          % V.kindProjector cross CrossVersion.full
   val collectionCompat  = "org.scala-lang.modules" %% "scala-collection-compat" % V.collectionCompat
-  val refined           = "eu.timepit"             %% "refined"                 % V.refined
 
   // streams
-  val fs2Kafka = "com.github.fd4s" %% "fs2-kafka"           % V.fs2Kafka
-  val pubsub   = "com.google.cloud" % "google-cloud-pubsub" % V.pubsub
-  val fs2AwsKinesis = ("io.laserdisc" %% "fs2-aws-kinesis" % V.fs2AwsKinesis)
-    .exclude("software.amazon.kinesis", "amazon-kinesis-client")
-    .exclude("com.amazonaws", "amazon-kinesis-producer")
-  val arnsSdk2       = "software.amazon.awssdk" % "arns"       % V.awsSdk2
-  val kinesisSdk2    = "software.amazon.awssdk" % "kinesis"    % V.awsSdk2
-  val dynamoDbSdk2   = "software.amazon.awssdk" % "dynamodb"   % V.awsSdk2
-  val cloudwatchSdk2 = "software.amazon.awssdk" % "cloudwatch" % V.awsSdk2
+  val fs2Kafka       = "com.github.fd4s"       %% "fs2-kafka"           % V.fs2Kafka
+  val pubsub         = "com.google.cloud"       % "google-cloud-pubsub" % V.pubsub
+  val arnsSdk2       = "software.amazon.awssdk" % "arns"                % V.awsSdk2
+  val kinesisSdk2    = "software.amazon.awssdk" % "kinesis"             % V.awsSdk2
+  val dynamoDbSdk2   = "software.amazon.awssdk" % "dynamodb"            % V.awsSdk2
+  val cloudwatchSdk2 = "software.amazon.awssdk" % "cloudwatch"          % V.awsSdk2
   val kinesisClient = ("software.amazon.kinesis" % "amazon-kinesis-client" % V.kinesisClient)
     .exclude("com.amazonaws", "amazon-kinesis-producer")
     .exclude("software.amazon.glue", "schema-registry-build-tools")
@@ -124,12 +118,10 @@ object Dependencies {
 
   val kinesisDependencies = Seq(
     kinesisClient,
-    fs2AwsKinesis,
     arnsSdk2,
     kinesisSdk2,
     dynamoDbSdk2,
     cloudwatchSdk2,
-    refined,
     circeConfig,
     circeGeneric,
     circeGenericExtra,

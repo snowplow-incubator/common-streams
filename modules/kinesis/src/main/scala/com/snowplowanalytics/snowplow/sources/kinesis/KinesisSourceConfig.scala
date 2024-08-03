@@ -7,8 +7,6 @@
  */
 package com.snowplowanalytics.snowplow.sources.kinesis
 
-import eu.timepit.refined.types.all.PosInt
-
 import io.circe._
 import io.circe.config.syntax._
 import io.circe.generic.extras.semiauto.deriveConfiguredDecoder
@@ -24,7 +22,6 @@ case class KinesisSourceConfig(
   workerIdentifier: String,
   initialPosition: KinesisSourceConfig.InitialPosition,
   retrievalMode: KinesisSourceConfig.Retrieval,
-  bufferSize: PosInt,
   customEndpoint: Option[URI],
   dynamodbCustomEndpoint: Option[URI],
   cloudwatchCustomEndpoint: Option[URI],
@@ -32,8 +29,6 @@ case class KinesisSourceConfig(
 )
 
 object KinesisSourceConfig {
-
-  private implicit val posIntDecoder: Decoder[PosInt] = Decoder.decodeInt.emap(PosInt.from)
 
   sealed trait InitialPosition
 

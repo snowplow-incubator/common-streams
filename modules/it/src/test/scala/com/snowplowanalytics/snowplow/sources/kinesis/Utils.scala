@@ -12,8 +12,6 @@ import cats.effect.{IO, Ref}
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
 
-import eu.timepit.refined.types.numeric.PosInt
-
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
@@ -94,7 +92,6 @@ object Utils {
     UUID.randomUUID.toString,
     KinesisSourceConfig.InitialPosition.TrimHorizon,
     KinesisSourceConfig.Retrieval.Polling(1),
-    PosInt.unsafeFrom(1),
     Some(endpoint),
     Some(endpoint),
     Some(endpoint),
