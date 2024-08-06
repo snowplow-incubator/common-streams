@@ -108,6 +108,7 @@ lazy val runtimeCommon: Project = project
   .settings(BuildSettings.publishSettings)
   .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
+  .settings(BuildSettings.igluTestSettings)
   .settings(
     previewFixedPort := Some(9994),
     Preprocess / preprocessVars := Map("VERSION" -> version.value)

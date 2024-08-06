@@ -58,6 +58,7 @@ object Dependencies {
   val log4cats          = "org.typelevel"          %% "log4cats-slf4j"          % V.log4cats
   val catsRetry         = "com.github.cb372"       %% "cats-retry"              % V.catsRetry
   val emberServer       = "org.http4s"             %% "http4s-ember-server"     % V.http4s
+  val http4sCirce       = "org.http4s"             %% "http4s-circe"            % V.http4s
   val decline           = "com.monovore"           %% "decline-effect"          % V.decline
   val circeConfig       = "io.circe"               %% "circe-config"            % V.circeConfig
   val circeGeneric      = "io.circe"               %% "circe-generic"           % V.circe
@@ -169,6 +170,7 @@ object Dependencies {
     circeGeneric,
     emberServer,
     fs2,
+    http4sCirce,
     igluClient,
     log4cats,
     slf4jApi,
