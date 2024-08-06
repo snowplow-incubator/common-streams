@@ -25,7 +25,6 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import com.snowplowanalytics.iglu.core.circe.implicits._
 import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaVer, SelfDescribingData}
-import com.snowplowanalytics.snowplow.runtime.AppInfo
 
 trait Webhook[F[_], Alert] {
   def alert(message: Alert): F[Unit]
