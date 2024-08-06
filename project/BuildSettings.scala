@@ -115,7 +115,8 @@ object BuildSettings {
     Test / igluUris := Seq(
       // Iglu Central schemas used in tests will get pre-fetched by sbt
       "iglu:com.snowplowanalytics.iglu/anything-a/jsonschema/1-0-0",
-      "iglu:com.snowplowanalytics.snowplow.media/ad_break_end_event/jsonschema/1-0-0"
+      "iglu:com.snowplowanalytics.snowplow.media/ad_break_end_event/jsonschema/1-0-0",
+      "iglu:com.snowplowanalytics.monitoring.loader/alert/jsonschema/1-0-0"
     )
   )
 }
