@@ -7,20 +7,18 @@
  */
 package com.snowplowanalytics.snowplow.runtime
 
-import cats.{Applicative, Id, Show}
-import cats.implicits._
+import cats.{Applicative, Eq, Id, Show}
 import cats.effect.testing.specs2.CatsEffect
 import cats.effect.{Clock, IO, Ref, Resource}
+import cats.effect.testkit.TestControl
 import org.http4s.{Headers, Method, Response}
 import org.http4s.client.Client
 import io.circe.Json
-import io.circe.literal.JsonStringContext
 import io.circe.parser.{parse => circeParse}
-import io.circe.DecodingFailure
 import org.http4s.Uri
 import org.specs2.Specification
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import java.util.concurrent.TimeUnit
 
 import com.snowplowanalytics.iglu.core.SelfDescribingData
@@ -33,78 +31,184 @@ class WebhookSpec extends Specification with CatsEffect {
   import WebhookSpec._
 
   def is = s2"""
-  The webhook config decoder should:
-    Decode a valid JSON config $decode1
-    Not decode JSON if a required field is missing $decode2
   The webhook should:
-    Not send any payloads if config is empty $send1
-    Send a valid payload if given valid config $send2
-    Ignore any exception raised by sending webhook $send3
+    Not send any payloads if app health never leaves awaiting status $send1
+    Send a single hearbeat after app becomes healthy for setup $send2
+    Send a second heartbeat after configured period of time $send3
+    Send a single alert after app becomes unhealthy for setup $send4
+    Send multiple alerts if app becomes unhealthy for setup with different alert messages $send5
+    Send alternating hearbeat and alert if app health flip flops $send6
+    Not send any payloads if endpoint is not set in the configuration $send7
+    Ignore any exception raised by sending webhook $send8
   """
 
-  def decode1 = {
-    val json = json"""
-    {
-      "endpoint": "http://example.com/xyz?abc=123",
-      "tags": {
-        "abc": "xyz"
-      }
+  def send1 = {
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      val _ = appHealth
+      for {
+        _ <- IO.sleep(60.minutes)
+        reportedRequests <- getReportedRequests
+      } yield reportedRequests should beEmpty
     }
-    """
-
-    json.as[Option[Webhook.Config]] must beRight.like { case Some(c: Webhook.Config) =>
-      List(
-        c.endpoint must beEqualTo(Uri.unsafeFromString("http://example.com/xyz?abc=123")),
-        c.tags must beEqualTo(Map("abc" -> "xyz"))
-      ).reduce(_ and _)
-    }
+    TestControl.executeEmbed(io)
   }
 
-  def decode2 = {
-    val json = json"""
-    {
-      "tags": {
-        "abc": "xyz"
-      }
-    }
-    """
-
-    json.as[Option[Webhook.Config]] must beLeft.like { case e: DecodingFailure =>
-      e.show must beEqualTo("DecodingFailure at .endpoint: Missing required field")
-    }
-  }
-
-  def send1 = for {
-    ref <- Ref[IO].of(List.empty[ReportedRequest])
-    httpClient = reportingHttpClient(ref)
-    webhook    = Webhook.create[IO, TestAlert](None, testAppInfo, httpClient)
-    _ <- webhook.alert(TestAlert("this is a test"))
-    results <- ref.get
-  } yield results must beEmpty
-
-  def send2 = for {
-    ref <- Ref[IO].of(List.empty[ReportedRequest])
-    httpClient = reportingHttpClient(ref)
-    webhook    = Webhook.create[IO, TestAlert](Some(testConfig), testAppInfo, httpClient)
-    _ <- webhook.alert(TestAlert("this is a test"))
-    results <- ref.get
-  } yield List(
-    results must haveSize(1),
-    results must contain { req: ReportedRequest =>
-      List(
-        mustHaveValidAlertBody(req.body),
-        req.method must beEqualTo(Method.POST),
-        req.uri must beEqualTo(testConfig.endpoint),
-        req.headers.toString must contain("Content-Type: application/json")
+  def send2 = {
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        reportedRequests <- getReportedRequests
+      } yield List(
+        reportedRequests should haveSize(1),
+        reportedRequests must contain { req: ReportedRequest =>
+          List(
+            req.method must beEqualTo(Method.POST),
+            req.uri must beEqualTo(testEndpoint),
+            req.headers.toString must contain("Content-Type: application/json")
+          ).reduce(_ and _)
+        }
       ).reduce(_ and _)
     }
-  ).reduce(_ and _)
+    TestControl.executeEmbed(io)
+  }
 
   def send3 = {
-    val webhook = Webhook.create[IO, TestAlert](Some(testConfig), testAppInfo, errorRaisingHttpClient)
-    for {
-      _ <- webhook.alert(TestAlert("this is a test"))
-    } yield ok
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(45.minutes)
+        reportedRequests <- getReportedRequests
+      } yield List(
+        reportedRequests should haveSize(2),
+        reportedRequests must contain { req: ReportedRequest =>
+          List(
+            req.method must beEqualTo(Method.POST),
+            req.uri must beEqualTo(testEndpoint),
+            req.headers.toString must contain("Content-Type: application/json")
+          ).reduce(_ and _)
+        }.forall
+      ).reduce(_ and _)
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def send4 = {
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- IO.sleep(5.minutes)
+        reportedRequests <- getReportedRequests
+      } yield List(
+        reportedRequests should haveSize(1),
+        reportedRequests must contain { req: ReportedRequest =>
+          List(
+            mustHaveValidAlertBody(req.body),
+            req.method must beEqualTo(Method.POST),
+            req.uri must beEqualTo(testEndpoint),
+            req.headers.toString must contain("Content-Type: application/json")
+          ).reduce(_ and _)
+        }
+      ).reduce(_ and _)
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def send5 = {
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 1"))
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 2"))
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 3"))
+        _ <- IO.sleep(5.minutes)
+        reportedRequests <- getReportedRequests
+      } yield List(
+        reportedRequests should haveSize(3),
+        reportedRequests must contain { req: ReportedRequest =>
+          List(
+            mustHaveValidAlertBody(req.body),
+            req.method must beEqualTo(Method.POST),
+            req.uri must beEqualTo(testEndpoint),
+            req.headers.toString must contain("Content-Type: application/json")
+          ).reduce(_ and _)
+        }.forall
+      ).reduce(_ and _)
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def send6 = {
+    val io = resources().use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- IO.sleep(5.minutes)
+        reportedRequests <- getReportedRequests
+      } yield List(
+        reportedRequests should haveSize(4),
+        reportedRequests must contain { req: ReportedRequest =>
+          List(
+            mustHaveValidAlertBody(req.body),
+            req.method must beEqualTo(Method.POST),
+            req.uri must beEqualTo(testEndpoint),
+            req.headers.toString must contain("Content-Type: application/json")
+          ).reduce(_ and _)
+        }.exactly(2.times)
+        // TODO: Test for the heartbeat events here once schema exists in Iglu Central
+      ).reduce(_ and _)
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def send7 = {
+    val config = testConfig.copy(endpoint = None)
+    val io = resources(config).use { case (getReportedRequests, appHealth) =>
+      for {
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(5.minutes)
+        reportedRequests <- getReportedRequests
+      } yield reportedRequests should beEmpty
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def send8 = {
+    val resources = for {
+      appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService])
+      _ <- Webhook.resource(testConfig, testAppInfo, errorRaisingHttpClient, appHealth)
+    } yield appHealth
+
+    val io = resources.use { appHealth =>
+      for {
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(30.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(30.minutes)
+        _ <- appHealth.becomeHealthyForSetup
+        _ <- IO.sleep(30.minutes)
+      } yield ok
+    }
+
+    TestControl.executeEmbed(io)
   }
 
   private def mustHaveValidAlertBody(body: String) =
@@ -126,6 +230,13 @@ object WebhookSpec {
   implicit def testAlertShow: Show[TestAlert] =
     Show(_.msg)
 
+  implicit def testAlertEq: Eq[TestAlert] =
+    Eq.by(_.msg)
+
+  sealed trait TestService
+  case object TestService1 extends TestService
+  case object TestService2 extends TestService
+
   val testAppInfo: AppInfo = new AppInfo {
     def name: String        = "testName"
     def version: String     = "testVersion"
@@ -133,9 +244,12 @@ object WebhookSpec {
     def cloud: String       = "testCloud"
   }
 
+  def testEndpoint = Uri.unsafeFromString("http://example.com/xyz?abc=123")
+
   def testConfig: Webhook.Config = Webhook.Config(
-    endpoint = Uri.unsafeFromString("http://example.com/xyz?abc=123"),
-    tags     = Map("myTag" -> "myValue")
+    endpoint  = Some(testEndpoint),
+    tags      = Map("myTag" -> "myValue"),
+    heartbeat = 42.minutes
   )
 
   // Used in tests to report the request that was sent to the webhook
@@ -156,6 +270,22 @@ object WebhookSpec {
         } yield Response.notFound[IO]
       }
     }
+
+  /**
+   * Resources for running a Spec
+   *
+   * @return
+   *   a IO that records the requests sent to the webhook, and the AppHealth on which the spec can
+   *   set healthy/unhealthy services
+   */
+  def resources(
+    config: Webhook.Config = testConfig
+  ): Resource[IO, (IO[List[ReportedRequest]], AppHealth.Interface[IO, TestAlert, TestService])] = for {
+    ref <- Resource.eval(Ref[IO].of(List.empty[ReportedRequest]))
+    httpClient = reportingHttpClient(ref)
+    appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService])
+    _ <- Webhook.resource(config, testAppInfo, httpClient, appHealth)
+  } yield (ref.get, appHealth)
 
   // A http4s Client that raises exceptions
   def errorRaisingHttpClient: Client[IO] =
