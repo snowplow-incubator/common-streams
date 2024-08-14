@@ -17,6 +17,7 @@ import io.circe.Json
 import io.circe.parser.{parse => circeParse}
 import org.http4s.Uri
 import org.specs2.Specification
+import org.specs2.matcher.Matcher
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import java.util.concurrent.TimeUnit
@@ -33,7 +34,7 @@ class WebhookSpec extends Specification with CatsEffect {
   def is = s2"""
   The webhook should:
     Not send any payloads if app health never leaves awaiting status $send1
-    Send a single hearbeat after app becomes healthy for setup $send2
+    Send a single heartbeat after app becomes healthy for setup $send2
     Send a second heartbeat after configured period of time $send3
     Send a single alert after app becomes unhealthy for setup $send4
     Send multiple alerts if app becomes unhealthy for setup with different alert messages $send5
@@ -65,13 +66,7 @@ class WebhookSpec extends Specification with CatsEffect {
         reportedRequests <- getReportedRequests
       } yield List(
         reportedRequests should haveSize(1),
-        reportedRequests must contain { req: ReportedRequest =>
-          List(
-            req.method must beEqualTo(Method.POST),
-            req.uri must beEqualTo(testEndpoint),
-            req.headers.toString must contain("Content-Type: application/json")
-          ).reduce(_ and _)
-        }
+        reportedRequests must contain(beValidHeartbeatRequest)
       ).reduce(_ and _)
     }
     TestControl.executeEmbed(io)
@@ -85,13 +80,7 @@ class WebhookSpec extends Specification with CatsEffect {
         reportedRequests <- getReportedRequests
       } yield List(
         reportedRequests should haveSize(2),
-        reportedRequests must contain { req: ReportedRequest =>
-          List(
-            req.method must beEqualTo(Method.POST),
-            req.uri must beEqualTo(testEndpoint),
-            req.headers.toString must contain("Content-Type: application/json")
-          ).reduce(_ and _)
-        }.forall
+        reportedRequests must contain(beValidHeartbeatRequest).forall
       ).reduce(_ and _)
     }
     TestControl.executeEmbed(io)
@@ -109,14 +98,7 @@ class WebhookSpec extends Specification with CatsEffect {
         reportedRequests <- getReportedRequests
       } yield List(
         reportedRequests should haveSize(1),
-        reportedRequests must contain { req: ReportedRequest =>
-          List(
-            mustHaveValidAlertBody(req.body),
-            req.method must beEqualTo(Method.POST),
-            req.uri must beEqualTo(testEndpoint),
-            req.headers.toString must contain("Content-Type: application/json")
-          ).reduce(_ and _)
-        }
+        reportedRequests must contain(beValidAlertRequest)
       ).reduce(_ and _)
     }
     TestControl.executeEmbed(io)
@@ -134,14 +116,7 @@ class WebhookSpec extends Specification with CatsEffect {
         reportedRequests <- getReportedRequests
       } yield List(
         reportedRequests should haveSize(3),
-        reportedRequests must contain { req: ReportedRequest =>
-          List(
-            mustHaveValidAlertBody(req.body),
-            req.method must beEqualTo(Method.POST),
-            req.uri must beEqualTo(testEndpoint),
-            req.headers.toString must contain("Content-Type: application/json")
-          ).reduce(_ and _)
-        }.forall
+        reportedRequests must contain(beValidAlertRequest).forall
       ).reduce(_ and _)
     }
     TestControl.executeEmbed(io)
@@ -161,15 +136,8 @@ class WebhookSpec extends Specification with CatsEffect {
         reportedRequests <- getReportedRequests
       } yield List(
         reportedRequests should haveSize(4),
-        reportedRequests must contain { req: ReportedRequest =>
-          List(
-            mustHaveValidAlertBody(req.body),
-            req.method must beEqualTo(Method.POST),
-            req.uri must beEqualTo(testEndpoint),
-            req.headers.toString must contain("Content-Type: application/json")
-          ).reduce(_ and _)
-        }.exactly(2.times)
-        // TODO: Test for the heartbeat events here once schema exists in Iglu Central
+        reportedRequests must contain(beValidAlertRequest).exactly(2.times),
+        reportedRequests must contain(beValidHeartbeatRequest).exactly(2.times)
       ).reduce(_ and _)
     }
     TestControl.executeEmbed(io)
@@ -211,11 +179,35 @@ class WebhookSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
-  private def mustHaveValidAlertBody(body: String) =
+  private def beValidAlertRequest: Matcher[ReportedRequest] = { (req: ReportedRequest) =>
+    List(
+      mustHaveValidAlertBody(req.body),
+      req.method must beEqualTo(Method.POST),
+      req.uri must beEqualTo(testEndpoint),
+      req.headers.toString must contain("Content-Type: application/json")
+    ).reduce(_ and _)
+  }
+
+  private def beValidHeartbeatRequest: Matcher[ReportedRequest] = { (req: ReportedRequest) =>
+    List(
+      mustHaveValidHeartbeatBody(req.body),
+      req.method must beEqualTo(Method.POST),
+      req.uri must beEqualTo(testEndpoint),
+      req.headers.toString must contain("Content-Type: application/json")
+    ).reduce(_ and _)
+  }
+
+  private def mustHaveValidAlertBody =
+    mustHaveValidSdjBody("iglu:com.snowplowanalytics.monitoring.loader/alert/jsonschema/1-0-0") _
+
+  private def mustHaveValidHeartbeatBody =
+    mustHaveValidSdjBody("iglu:com.snowplowanalytics.monitoring.loader/heartbeat/jsonschema/1-0-0") _
+
+  private def mustHaveValidSdjBody(igluUri: String)(body: String) =
     circeParse(body) must beRight.like { case json: Json =>
       json.as[SelfDescribingData[Json]] must beRight.like { case sdj: SelfDescribingData[Json] =>
         List(
-          sdj.schema.toSchemaUri must beEqualTo("iglu:com.snowplowanalytics.monitoring.loader/alert/jsonschema/1-0-0"),
+          sdj.schema.toSchemaUri must beEqualTo(igluUri),
           igluCirceClient.check(sdj).value must beRight
         ).reduce(_ and _)
       }

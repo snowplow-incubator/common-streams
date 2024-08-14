@@ -52,7 +52,7 @@ import fs2.concurrent.SignallingRef
  *
  * val alertShow = Show[MyAppAlert] {
  *   case BadPassword => "Bad password"
- *   case MissingPermissions(moreDetails) => s"Missing permissions $moreDetails"
+ *   case MissingPermissions(moreDetails) => "Missing permissions " + moreDetails
  * }
  * }}}
  *
