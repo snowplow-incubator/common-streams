@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.runtime
 
-import cats.{Applicative, Eq, Id, Show}
+import cats.{Applicative, Id, Show}
 import cats.effect.testing.specs2.CatsEffect
 import cats.effect.{Clock, IO, Ref, Resource}
 import cats.effect.testkit.TestControl
@@ -221,9 +221,6 @@ object WebhookSpec {
 
   implicit def testAlertShow: Show[TestAlert] =
     Show(_.msg)
-
-  implicit def testAlertEq: Eq[TestAlert] =
-    Eq.by(_.msg)
 
   sealed trait TestService
   case object TestService1 extends TestService

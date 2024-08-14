@@ -56,11 +56,6 @@ import fs2.concurrent.SignallingRef
  * }
  * }}}
  *
- * Implement a `cats.Eq` for the alerts, so we can alert on anything uniquely new
- * {{{
- * val alertEq = Eq.fromUniversalEquals[Alert] // Do it better than this
- * }}}
- *
  * ==Environment initialization==
  *
  * Initialize the AppHealth as part of App Environment initialization:
@@ -168,12 +163,12 @@ object AppHealth {
     case object Healthy extends SetupStatus[Nothing]
     case class Unhealthy[Alert](alert: Alert) extends SetupStatus[Alert]
 
-    implicit def eq[Alert: Eq]: Eq[SetupStatus[Alert]] = Eq.instance {
+    implicit def eq[Alert: Show]: Eq[SetupStatus[Alert]] = Eq.instance {
       case (Healthy, Healthy)               => true
       case (Healthy, _)                     => false
       case (AwaitingHealth, AwaitingHealth) => true
       case (AwaitingHealth, _)              => false
-      case (Unhealthy(a1), Unhealthy(a2))   => Eq[Alert].eqv(a1, a2)
+      case (Unhealthy(a1), Unhealthy(a2))   => a1.show === a2.show
       case (Unhealthy(_), _)                => false
     }
   }

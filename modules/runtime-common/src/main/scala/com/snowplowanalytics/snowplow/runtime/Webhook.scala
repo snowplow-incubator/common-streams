@@ -13,7 +13,7 @@ package com.snowplowanalytics.snowplow.runtime
 import cats.effect.{Async, Resource, Sync}
 import cats.effect.implicits._
 import cats.implicits._
-import cats.{Eq, Show}
+import cats.Show
 import fs2.{Pipe, Pull, Stream}
 import io.circe.{Decoder, Json}
 import io.circe.generic.semiauto._
@@ -47,7 +47,7 @@ object Webhook {
     }
   }
 
-  def resource[F[_]: Async, SetupAlert: Show: Eq](
+  def resource[F[_]: Async, SetupAlert: Show](
     config: Config,
     appInfo: AppInfo,
     httpClient: Client[F],
@@ -55,7 +55,7 @@ object Webhook {
   ): Resource[F, Unit] =
     stream(config, appInfo, httpClient, appHealth).compile.drain.background.void
 
-  def stream[F[_]: Async, SetupAlert: Show: Eq](
+  def stream[F[_]: Async, SetupAlert: Show](
     config: Config,
     appInfo: AppInfo,
     httpClient: Client[F],
