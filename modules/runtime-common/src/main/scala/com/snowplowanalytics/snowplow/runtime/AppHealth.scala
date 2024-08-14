@@ -121,7 +121,7 @@ import fs2.concurrent.SignallingRef
 class AppHealth[F[_]: Monad, SetupAlert, RuntimeService] private (
   private[runtime] val setupHealth: SignallingRef[F, AppHealth.SetupStatus[SetupAlert]],
   unhealthyRuntimeServices: Ref[F, Set[RuntimeService]],
-  runtimeServiceReporters: Ref[F, List[F[Option[String]]]]
+  runtimeServiceReporters: List[F[Option[String]]]
 ) extends AppHealth.Interface[F, SetupAlert, RuntimeService] {
   import AppHealth._
 
@@ -137,19 +137,10 @@ class AppHealth[F[_]: Monad, SetupAlert, RuntimeService] private (
   def becomeUnhealthyForRuntimeService(service: RuntimeService): F[Unit] =
     unhealthyRuntimeServices.update(_ + service)
 
-  /**
-   * Add a reporter which is counted as an unhealthy runtime service if it returns a `Some`.
-   *
-   * The returned string must be a short description of why the service is unhealthy.
-   */
-  def addRuntimeHealthReporter(reporter: F[Option[String]]): F[Unit] =
-    runtimeServiceReporters.update(reporter :: _)
-
   private[runtime] def unhealthyRuntimeServiceMessages(implicit show: Show[RuntimeService]): F[List[String]] =
     for {
       services <- unhealthyRuntimeServices.get
-      reporters <- runtimeServiceReporters.get
-      extras <- reporters.sequence
+      extras <- runtimeServiceReporters.sequence
     } yield services.toList.map(_.show) ::: extras.flatten
 }
 
@@ -194,11 +185,17 @@ object AppHealth {
    *   Sealed trait of the alerts this app is allowed to send to the webhook for setup errors
    * @tparam RuntimeService
    *   Sealed trait of the services that this app requires to be healthy
+   *
+   * @param runtimeReporters
+   *   Reporters for any additional service, not covered by `RuntimeService`. Reporters provide a
+   *   String if a service is unhealthy. The String must be a short description of why the service
+   *   is unhealthy.
    */
-  def init[F[_]: Async, SetupAlert, RuntimeService]: F[AppHealth[F, SetupAlert, RuntimeService]] =
+  def init[F[_]: Async, SetupAlert, RuntimeService](
+    runtimeReporters: List[F[Option[String]]]
+  ): F[AppHealth[F, SetupAlert, RuntimeService]] =
     for {
       setupHealth <- SignallingRef[F, SetupStatus[SetupAlert]](SetupStatus.AwaitingHealth)
       unhealthyRuntimeServices <- Ref[F].of(Set.empty[RuntimeService])
-      reporters <- Ref[F].of(List.empty[F[Option[String]]])
-    } yield new AppHealth(setupHealth, unhealthyRuntimeServices, reporters)
+    } yield new AppHealth(setupHealth, unhealthyRuntimeServices, runtimeReporters)
 }

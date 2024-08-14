@@ -52,7 +52,14 @@ trait SourceAndAck[F[_]] {
 
 object SourceAndAck {
 
-  sealed trait HealthStatus
+  sealed trait HealthStatus { self =>
+    final def showIfUnhealthy: Option[String] =
+      self match {
+        case Healthy              => None
+        case unhealthy: Unhealthy => Some(unhealthy.show)
+      }
+  }
+
   case object Healthy extends HealthStatus
   sealed trait Unhealthy extends HealthStatus
 
@@ -86,4 +93,5 @@ object SourceAndAck {
     case LaggingEventProcessor(latency) => show"Processing latency is $latency"
     case InactiveSource(duration)       => show"Source of events has been inactive for $duration"
   }
+
 }

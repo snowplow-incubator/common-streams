@@ -71,7 +71,7 @@ object HealthProbe {
         } else None
 
         val awaitingMsg = if (allAwaiting.nonEmpty) {
-          val joined = allUnhealthy.mkString("Services are awaiting a healthy status [", ", ", "]")
+          val joined = allAwaiting.mkString("Services are awaiting a healthy status [", ", ", "]")
           Some(joined)
         } else None
 

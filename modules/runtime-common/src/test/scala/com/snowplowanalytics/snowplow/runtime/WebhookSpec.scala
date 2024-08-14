@@ -161,7 +161,7 @@ class WebhookSpec extends Specification with CatsEffect {
 
   def send8 = {
     val resources = for {
-      appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService])
+      appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService](Nil))
       _ <- Webhook.resource(testConfig, testAppInfo, errorRaisingHttpClient, appHealth)
     } yield appHealth
 
@@ -275,7 +275,7 @@ object WebhookSpec {
   ): Resource[IO, (IO[List[ReportedRequest]], AppHealth.Interface[IO, TestAlert, TestService])] = for {
     ref <- Resource.eval(Ref[IO].of(List.empty[ReportedRequest]))
     httpClient = reportingHttpClient(ref)
-    appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService])
+    appHealth <- Resource.eval(AppHealth.init[IO, TestAlert, TestService](Nil))
     _ <- Webhook.resource(config, testAppInfo, httpClient, appHealth)
   } yield (ref.get, appHealth)
 

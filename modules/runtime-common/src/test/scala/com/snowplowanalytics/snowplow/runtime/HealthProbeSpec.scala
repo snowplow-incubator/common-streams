@@ -26,20 +26,20 @@ class HealthProbeSpec extends Specification with CatsEffect {
   """
 
   def probe1 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.ServiceUnavailable)
 
   def probe2 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
     _ <- appHealth.becomeHealthyForSetup
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.Ok)
 
   def probe3 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
     _ <- appHealth.becomeHealthyForSetup
     _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
@@ -47,7 +47,7 @@ class HealthProbeSpec extends Specification with CatsEffect {
   } yield response.status must beEqualTo(Status.ServiceUnavailable)
 
   def probe4 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
     _ <- appHealth.becomeHealthyForSetup
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
@@ -55,7 +55,7 @@ class HealthProbeSpec extends Specification with CatsEffect {
   } yield response.status must beEqualTo(Status.ServiceUnavailable)
 
   def probe5 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
     _ <- appHealth.becomeHealthyForSetup
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)

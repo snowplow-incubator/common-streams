@@ -33,32 +33,32 @@ class AppHealthSpec extends Specification with CatsEffect {
   """
 
   def runtime1 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEmpty
 
   def runtime2 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEqualTo(List("test service 1"))
 
   def runtime3 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should containTheSameElementsAs(List("test service 1", "test service 2"))
 
   def runtime4 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEmpty
 
   def runtime5 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
     _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
@@ -66,9 +66,8 @@ class AppHealthSpec extends Specification with CatsEffect {
   } yield statuses should beEqualTo(List("test service 2"))
 
   def runtime6 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
     reporter <- Ref[IO].of(Option.empty[String])
-    _ <- appHealth.addRuntimeHealthReporter(reporter.get)
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](List(reporter.get))
     result1 <- appHealth.unhealthyRuntimeServiceMessages
     _ <- reporter.set(Some("test reporter unhealthy 1"))
     result2 <- appHealth.unhealthyRuntimeServiceMessages
@@ -81,31 +80,31 @@ class AppHealthSpec extends Specification with CatsEffect {
   ).reduce(_ and _)
 
   def setup1 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.AwaitingHealth)
 
   def setup2 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Unhealthy(TestAlert1))
 
   def setup3 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeHealthyForSetup
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Healthy)
 
   def setup4 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
     _ <- appHealth.becomeHealthyForSetup
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Healthy)
 
   def setup5 = for {
-    appHealth <- AppHealth.init[IO, TestAlert, TestService]
+    appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     _ <- appHealth.becomeHealthyForSetup
     _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
     setupHealth <- appHealth.setupHealth.get
