@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.runtime
 
+import cats.Show
 import cats.effect.testing.specs2.CatsEffect
 import cats.effect.{IO, Ref}
 import org.specs2.Specification
@@ -33,27 +34,27 @@ class AppHealthSpec extends Specification with CatsEffect {
 
   def runtime1 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
-    statuses <- appHealth.unhealthyRuntimeServices
+    statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEmpty
 
   def runtime2 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
-    statuses <- appHealth.unhealthyRuntimeServices
-  } yield statuses should beEqualTo(List(TestService1))
+    statuses <- appHealth.unhealthyRuntimeServiceMessages
+  } yield statuses should beEqualTo(List("test service 1"))
 
   def runtime3 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
-    statuses <- appHealth.unhealthyRuntimeServices
-  } yield statuses should containTheSameElementsAs(List(TestService1, TestService2))
+    statuses <- appHealth.unhealthyRuntimeServiceMessages
+  } yield statuses should containTheSameElementsAs(List("test service 1", "test service 2"))
 
   def runtime4 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
-    statuses <- appHealth.unhealthyRuntimeServices
+    statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEmpty
 
   def runtime5 = for {
@@ -61,19 +62,23 @@ class AppHealthSpec extends Specification with CatsEffect {
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
     _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
     _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
-    statuses <- appHealth.unhealthyRuntimeServices
-  } yield statuses should beEqualTo(List(TestService2))
+    statuses <- appHealth.unhealthyRuntimeServiceMessages
+  } yield statuses should beEqualTo(List("test service 2"))
 
   def runtime6 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
-    reporter <- Ref[IO].of[AppHealth.RuntimeServiceStatus](AppHealth.RuntimeServiceStatus.Healthy)
-    _ <- appHealth.addRuntimeHealthReporter(TestService1, reporter.get)
-    result1 <- appHealth.unhealthyRuntimeServices
-    _ <- reporter.set(AppHealth.RuntimeServiceStatus.Unhealthy)
-    result2 <- appHealth.unhealthyRuntimeServices
-    _ <- reporter.set(AppHealth.RuntimeServiceStatus.Healthy)
-    result3 <- appHealth.unhealthyRuntimeServices
-  } yield (result1 should beEmpty) and (result2 should beEqualTo(List(TestService1))) and (result3 should beEmpty)
+    reporter <- Ref[IO].of(Option.empty[String])
+    _ <- appHealth.addRuntimeHealthReporter(reporter.get)
+    result1 <- appHealth.unhealthyRuntimeServiceMessages
+    _ <- reporter.set(Some("test reporter unhealthy 1"))
+    result2 <- appHealth.unhealthyRuntimeServiceMessages
+    _ <- reporter.set(None)
+    result3 <- appHealth.unhealthyRuntimeServiceMessages
+  } yield List(
+    result1 should beEmpty,
+    result2 should beEqualTo(List("test reporter unhealthy 1")),
+    result3 should beEmpty
+  ).reduce(_ and _)
 
   def setup1 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService]
@@ -117,4 +122,9 @@ object AppHealthSpec {
   sealed trait TestService
   case object TestService1 extends TestService
   case object TestService2 extends TestService
+
+  implicit def showTestService: Show[TestService] = Show {
+    case TestService1 => "test service 1"
+    case TestService2 => "test service 2"
+  }
 }

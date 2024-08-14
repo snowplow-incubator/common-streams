@@ -52,10 +52,10 @@ object HealthProbe {
   ): HttpApp[F] =
     Kleisli { _ =>
       val problemsF = for {
-        runtimeUnhealthies <- appHealth.unhealthyRuntimeServices
+        runtimeUnhealthies <- appHealth.unhealthyRuntimeServiceMessages
         setupHealth <- appHealth.setupHealth.get
       } yield {
-        val allUnhealthy = runtimeUnhealthies.map(_.show) ++ (setupHealth match {
+        val allUnhealthy = runtimeUnhealthies ++ (setupHealth match {
           case AppHealth.SetupStatus.Unhealthy(_) => Some("External setup configuration")
           case _                                  => None
         })
