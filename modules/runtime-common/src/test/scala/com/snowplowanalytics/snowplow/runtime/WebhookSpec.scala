@@ -57,11 +57,11 @@ class WebhookSpec extends Specification with CatsEffect {
   def send2 = {
     val io = resources().use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
         reportedRequests <- getReportedRequests
       } yield List(
@@ -75,7 +75,7 @@ class WebhookSpec extends Specification with CatsEffect {
   def send3 = {
     val io = resources().use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(45.minutes)
         reportedRequests <- getReportedRequests
       } yield List(
@@ -89,11 +89,11 @@ class WebhookSpec extends Specification with CatsEffect {
   def send4 = {
     val io = resources().use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom!"))
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom!"))
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom!"))
         _ <- IO.sleep(5.minutes)
         reportedRequests <- getReportedRequests
       } yield List(
@@ -107,11 +107,11 @@ class WebhookSpec extends Specification with CatsEffect {
   def send5 = {
     val io = resources().use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 1"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom 1"))
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 2"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom 2"))
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom 3"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom 3"))
         _ <- IO.sleep(5.minutes)
         reportedRequests <- getReportedRequests
       } yield List(
@@ -125,13 +125,13 @@ class WebhookSpec extends Specification with CatsEffect {
   def send6 = {
     val io = resources().use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom!"))
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeUnhealthyForSetup(TestAlert("boom!"))
+        _ <- appHealth.beUnhealthyForSetup(TestAlert("boom!"))
         _ <- IO.sleep(5.minutes)
         reportedRequests <- getReportedRequests
       } yield List(
@@ -147,11 +147,11 @@ class WebhookSpec extends Specification with CatsEffect {
     val config = testConfig.copy(endpoint = None)
     val io = resources(config).use { case (getReportedRequests, appHealth) =>
       for {
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(5.minutes)
         reportedRequests <- getReportedRequests
       } yield reportedRequests should beEmpty
@@ -167,11 +167,11 @@ class WebhookSpec extends Specification with CatsEffect {
 
     val io = resources.use { appHealth =>
       for {
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(30.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(30.minutes)
-        _ <- appHealth.becomeHealthyForSetup
+        _ <- appHealth.beHealthyForSetup
         _ <- IO.sleep(30.minutes)
       } yield ok
     }

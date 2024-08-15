@@ -39,29 +39,29 @@ class AppHealthSpec extends Specification with CatsEffect {
 
   def runtime2 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEqualTo(List("test service 1"))
 
   def runtime3 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService2)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should containTheSameElementsAs(List("test service 1", "test service 2"))
 
   def runtime4 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
-    _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beHealthyForRuntimeService(TestService1)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEmpty
 
   def runtime5 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService2)
-    _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService2)
+    _ <- appHealth.beHealthyForRuntimeService(TestService1)
     statuses <- appHealth.unhealthyRuntimeServiceMessages
   } yield statuses should beEqualTo(List("test service 2"))
 
@@ -86,27 +86,27 @@ class AppHealthSpec extends Specification with CatsEffect {
 
   def setup2 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
+    _ <- appHealth.beUnhealthyForSetup(TestAlert1)
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Unhealthy(TestAlert1))
 
   def setup3 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeHealthyForSetup
+    _ <- appHealth.beHealthyForSetup
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Healthy)
 
   def setup4 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
-    _ <- appHealth.becomeHealthyForSetup
+    _ <- appHealth.beUnhealthyForSetup(TestAlert1)
+    _ <- appHealth.beHealthyForSetup
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Healthy)
 
   def setup5 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
-    _ <- appHealth.becomeHealthyForSetup
-    _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
+    _ <- appHealth.beHealthyForSetup
+    _ <- appHealth.beUnhealthyForSetup(TestAlert1)
     setupHealth <- appHealth.setupHealth.get
   } yield setupHealth should beEqualTo(AppHealth.SetupStatus.Unhealthy(TestAlert1))
 

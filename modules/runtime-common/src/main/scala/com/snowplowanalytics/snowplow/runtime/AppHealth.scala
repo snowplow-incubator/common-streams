@@ -93,21 +93,21 @@ import fs2.concurrent.SignallingRef
  * {{{
  * // After catching an exception in the bad events stream
  * _ <- Logger[F].error(e)("Problem with bad rows output stream")
- * _ <- appHealth.becomeUnhealthyForRuntimeService(BadRowsOutputStream)
+ * _ <- appHealth.beUnhealthyForRuntimeService(BadRowsOutputStream)
  *
  * // After bad rows stream becomes healthy again
  * _ <- Logger[F].debug("Bad rows output stream is ok")
- * _ <- appHealth.becomeHealthyForRuntimeService(BadRowsOutputStream)
+ * _ <- appHealth.beHealthyForRuntimeService(BadRowsOutputStream)
  *
  * // After catching an exception with the external setup configuration
  * // Note this will send an alert webhook
  * _ <- Logger[F].error(e)("Problem with the provided password")
- * _ <- appHealth.becomeUnhealthyForSetup(BadPassword)
+ * _ <- appHealth.beUnhealthyForSetup(BadPassword)
  *
  * // After successful connection to the externally configured services
  * // Note this will send the first hearbeat webhook
  * _ <- Logger[F].error(e)("Everything ok with the provided setup configuration")
- * _ <- appHealth.becomeHealthyForSetup
+ * _ <- appHealth.beHealthyForSetup
  * }}}
  *
  * The application processing code does not need to explicitly send any monitoring alert or adjust
@@ -120,16 +120,16 @@ class AppHealth[F[_]: Monad, SetupAlert, RuntimeService] private (
 ) extends AppHealth.Interface[F, SetupAlert, RuntimeService] {
   import AppHealth._
 
-  def becomeHealthyForSetup: F[Unit] =
+  def beHealthyForSetup: F[Unit] =
     setupHealth.set(SetupStatus.Healthy)
 
-  def becomeUnhealthyForSetup(alert: SetupAlert): F[Unit] =
+  def beUnhealthyForSetup(alert: SetupAlert): F[Unit] =
     setupHealth.set(SetupStatus.Unhealthy(alert))
 
-  def becomeHealthyForRuntimeService(service: RuntimeService): F[Unit] =
+  def beHealthyForRuntimeService(service: RuntimeService): F[Unit] =
     unhealthyRuntimeServices.update(_ - service)
 
-  def becomeUnhealthyForRuntimeService(service: RuntimeService): F[Unit] =
+  def beUnhealthyForRuntimeService(service: RuntimeService): F[Unit] =
     unhealthyRuntimeServices.update(_ + service)
 
   private[runtime] def unhealthyRuntimeServiceMessages(implicit show: Show[RuntimeService]): F[List[String]] =
@@ -148,13 +148,13 @@ object AppHealth {
    * implementation.
    */
   trait Interface[F[_], -SetupAlert, -RuntimeService] {
-    def becomeHealthyForSetup: F[Unit]
+    def beHealthyForSetup: F[Unit]
 
-    def becomeUnhealthyForSetup(alert: SetupAlert): F[Unit]
+    def beUnhealthyForSetup(alert: SetupAlert): F[Unit]
 
-    def becomeHealthyForRuntimeService(service: RuntimeService): F[Unit]
+    def beHealthyForRuntimeService(service: RuntimeService): F[Unit]
 
-    def becomeUnhealthyForRuntimeService(service: RuntimeService): F[Unit]
+    def beUnhealthyForRuntimeService(service: RuntimeService): F[Unit]
   }
 
   private[runtime] sealed trait SetupStatus[+Alert]

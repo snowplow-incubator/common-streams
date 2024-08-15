@@ -34,32 +34,32 @@ class HealthProbeSpec extends Specification with CatsEffect {
   def probe2 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
-    _ <- appHealth.becomeHealthyForSetup
+    _ <- appHealth.beHealthyForSetup
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.Ok)
 
   def probe3 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
-    _ <- appHealth.becomeHealthyForSetup
-    _ <- appHealth.becomeUnhealthyForSetup(TestAlert1)
+    _ <- appHealth.beHealthyForSetup
+    _ <- appHealth.beUnhealthyForSetup(TestAlert1)
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.ServiceUnavailable)
 
   def probe4 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
-    _ <- appHealth.becomeHealthyForSetup
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beHealthyForSetup
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.ServiceUnavailable)
 
   def probe5 = for {
     appHealth <- AppHealth.init[IO, TestAlert, TestService](Nil)
     httpApp = HealthProbe.httpApp(appHealth)
-    _ <- appHealth.becomeHealthyForSetup
-    _ <- appHealth.becomeUnhealthyForRuntimeService(TestService1)
-    _ <- appHealth.becomeHealthyForRuntimeService(TestService1)
+    _ <- appHealth.beHealthyForSetup
+    _ <- appHealth.beUnhealthyForRuntimeService(TestService1)
+    _ <- appHealth.beHealthyForRuntimeService(TestService1)
     response <- httpApp.run(Request[IO]())
   } yield response.status must beEqualTo(Status.Ok)
 
