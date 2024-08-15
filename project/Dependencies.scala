@@ -166,6 +166,7 @@ object Dependencies {
   val runtimeCommonDependencies = Seq(
     cats,
     catsEffectKernel,
+    catsRetry,
     circeConfig,
     circeGeneric,
     emberServer,
