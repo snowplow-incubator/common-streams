@@ -46,8 +46,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
 
     when handling Iglu failures should
       return a IgluError if schema key does not exist in a valid series of schemas $fail1
-      return a SchemaListNotFound if the series of schemas does not exist $fail2
-      return an InvalidSchema if the series contains a schema that cannot be parsed $fail3
+      return an InvalidSchema if the series contains a schema that cannot be parsed $fail2
   """
 
   def ue1 = {
@@ -533,26 +532,6 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
   }
 
   def fail2 = {
-
-    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "doesnotexist", 1)
-
-    val input = Map(
-      tabledEntity -> Set((0, 0))
-    )
-
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (fields must beEmpty) and
-        (failures must haveSize(1)) and
-        (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
-          (failure.tabledEntity must beEqualTo(tabledEntity)) and
-            (failure.versionsInBatch must beEqualTo(Set((0, 0)))) and
-            (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.SchemaListNotFound => ok })
-        })
-    }
-
-  }
-
-  def fail3 = {
 
     val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "invalid_syntax", 1)
 

@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.data.NonEmptyVector
+import cats.data.{NonEmptyList, NonEmptyVector}
 import cats.implicits._
 import io.circe.syntax._
 import com.snowplowanalytics.iglu.core.{SchemaKey, SelfDescribingSchema}
@@ -51,23 +51,19 @@ object TypedTabledEntity {
    * @param subVersions
    *   Sub-versions (e.g. '*-0-0') that were present in the batch of events.
    * @param schemas
-   *   Iglu schemas pre-fetched from Iglu Server
+   *   Iglu schemas pre-fetched from Iglu Server ordered by key
    */
   private[transform] def build(
     tabledEntity: TabledEntity,
     subVersions: Set[SchemaSubVersion],
-    schemas: NonEmptyVector[SelfDescribingSchema[Schema]]
+    schemas: NonEmptyList[SelfDescribingSchema[Schema]]
   ): Option[TypedTabledEntity] =
-    // Schemas need to be ordered by key to merge in correct order.
-    schemas.sorted.toVector
-      .flatMap { case sds =>
-        fieldFromSchema(tabledEntity, sds.schema).map((_, sds))
-      }
-      .toNev
-      .map { nev =>
-        val (rootField, rootSchema) = nev.head
+    schemas
+      .traverse(sds => fieldFromSchema(tabledEntity, sds.schema).map((_, sds)))
+      .map { nel =>
+        val (rootField, rootSchema) = nel.head
         val tte                     = TypedTabledEntity(tabledEntity, rootField, Set(keyToSubVersion(rootSchema.self.schemaKey)), Nil)
-        nev.tail
+        nel.tail
           .foldLeft(tte) { case (columnGroup, (field, selfDescribingSchema)) =>
             val schemaKey  = selfDescribingSchema.self.schemaKey
             val subversion = keyToSubVersion(schemaKey)

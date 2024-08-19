@@ -164,7 +164,7 @@ object WebhookSpec {
     }
 
   def igluCirceClient: IgluCirceClient[Id] =
-    IgluCirceClient.fromResolver[Id](Resolver[Id](Nil, None), 0)
+    IgluCirceClient.fromResolver[Id](Resolver[Id](Nil, None), 0, 1000)
 
   // Needed because we use Id effect in tests for iglu-scala-client
   implicit val catsClockIdInstance: Clock[Id] = new Clock[Id] {

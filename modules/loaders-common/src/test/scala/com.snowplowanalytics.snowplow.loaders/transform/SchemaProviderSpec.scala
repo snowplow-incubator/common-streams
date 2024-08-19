@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.data.NonEmptyVector
+import cats.data.NonEmptyList
 import cats.effect.IO
 import io.circe.parser.{parse => parseToJson}
 import scala.io.Source
@@ -15,7 +15,7 @@ import scala.io.Source
 import org.specs2.Specification
 import cats.effect.testing.specs2.CatsEffect
 
-import com.snowplowanalytics.iglu.core.{SchemaCriterion, SchemaKey, SchemaMap, SelfDescribingSchema}
+import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaMap, SelfDescribingSchema}
 import com.snowplowanalytics.iglu.client.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.JavaNetRegistryLookup._
 import com.snowplowanalytics.iglu.schemaddl.jsonschema.Schema
@@ -32,18 +32,17 @@ class SchemaProviderSpec extends Specification with CatsEffect {
     fetch all schemas from a series when queried with the highest schema key $e2
     fetch subset of schemas from a series when queried with an intermediate schema key $e3
     return a IgluError if schema key does not exist in a valid series of schemas $e4
-    return a SchemaListNotFound if the series of schemas does not exist $e5
-    return an InvalidSchema if the series contains a schema that cannot be parsed $e6
+    return an InvalidSchema if the series contains a schema that cannot be parsed $e5
   """
 
   def e1 = {
 
-    val expected = NonEmptyVector.of(
+    val expected = NonEmptyList.of(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey700).value.map { result =>
-      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
+      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
         schemas must beEqualTo(expected)
       }
     }
@@ -52,15 +51,15 @@ class SchemaProviderSpec extends Specification with CatsEffect {
 
   def e2 = {
 
-    val expected = Vector(
+    val expected = List(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700),
       SelfDescribingSchema(SchemaMap(testSchemaKey701), testSchema701),
       SelfDescribingSchema(SchemaMap(testSchemaKey710), testSchema710)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey710).value.map { result =>
-      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
-        schemas.toVector must containTheSameElementsAs(expected)
+      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
+        schemas.toList must containTheSameElementsAs(expected)
       }
     }
 
@@ -68,14 +67,14 @@ class SchemaProviderSpec extends Specification with CatsEffect {
 
   def e3 = {
 
-    val expected = Vector(
+    val expected = List(
       SelfDescribingSchema(SchemaMap(testSchemaKey700), testSchema700),
       SelfDescribingSchema(SchemaMap(testSchemaKey701), testSchema701)
     )
 
     SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey701).value.map { result =>
-      result must beRight { schemas: NonEmptyVector[SelfDescribingSchema[Schema]] =>
-        schemas.toVector must containTheSameElementsAs(expected)
+      result must beRight { schemas: NonEmptyList[SelfDescribingSchema[Schema]] =>
+        schemas.toList must containTheSameElementsAs(expected)
       }
     }
 
@@ -89,19 +88,6 @@ class SchemaProviderSpec extends Specification with CatsEffect {
     }
 
   def e5 = {
-
-    val testSchemaKey = SchemaKey.fromUri("iglu:myvendor/doesnotexist/jsonschema/7-0-0").toOption.get
-    val criterion     = SchemaCriterion.parse("iglu:myvendor/doesnotexist/jsonschema/7-*-*").get
-
-    SchemaProvider.fetchSchemasWithSameModel(embeddedResolver, testSchemaKey).value.map { result =>
-      result must beLeft.like { case failure: FailureDetails.LoaderIgluError.SchemaListNotFound =>
-        failure.schemaCriterion must beEqualTo(criterion)
-      }
-    }
-
-  }
-
-  def e6 = {
 
     val testSchemaKey = SchemaKey.fromUri("iglu:myvendor/invalid_syntax/jsonschema/1-0-0").toOption.get
 
