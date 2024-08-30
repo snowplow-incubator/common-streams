@@ -7,9 +7,10 @@
  */
 package com.snowplowanalytics.snowplow.runtime
 
-import cats.effect.{Async, Resource, Sync}
-import cats.data.Kleisli
+import cats.Show
 import cats.implicits._
+import cats.data.Kleisli
+import cats.effect.{Async, Resource, Sync}
 import com.comcast.ip4s.{Ipv4Address, Port}
 import io.circe.Decoder
 import org.http4s.ember.server.EmberServerBuilder
@@ -22,18 +23,17 @@ object HealthProbe {
 
   private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
-  sealed trait Status
-  case object Healthy extends Status
-  case class Unhealthy(reason: String) extends Status
-
-  def resource[F[_]: Async](port: Port, isHealthy: F[Status]): Resource[F, Unit] = {
+  def resource[F[_]: Async, RuntimeService: Show](
+    port: Port,
+    appHealth: AppHealth[F, ?, RuntimeService]
+  ): Resource[F, Unit] = {
     implicit val network: Network[F] = Network.forAsync[F]
     EmberServerBuilder
       .default[F]
       .withHost(Ipv4Address.fromBytes(0, 0, 0, 0))
       .withPort(port)
       .withMaxConnections(1)
-      .withHttpApp(httpApp(isHealthy))
+      .withHttpApp(httpApp(appHealth))
       .build
       .evalTap { _ =>
         Logger[F].info(s"Health service listening on port $port")
@@ -47,16 +47,48 @@ object HealthProbe {
     }
   }
 
-  private def httpApp[F[_]: Sync](isHealthy: F[Status]): HttpApp[F] =
+  private[runtime] def httpApp[F[_]: Sync, RuntimeService: Show](
+    appHealth: AppHealth[F, ?, RuntimeService]
+  ): HttpApp[F] =
     Kleisli { _ =>
-      isHealthy.flatMap {
-        case Healthy =>
+      val problemsF = for {
+        runtimeUnhealthies <- appHealth.unhealthyRuntimeServiceMessages
+        setupHealth <- appHealth.setupHealth.get
+      } yield {
+        val allUnhealthy = runtimeUnhealthies ++ (setupHealth match {
+          case AppHealth.SetupStatus.Unhealthy(_) => Some("External setup configuration")
+          case _                                  => None
+        })
+
+        val allAwaiting = setupHealth match {
+          case AppHealth.SetupStatus.AwaitingHealth => Some("External setup configuration")
+          case _                                    => None
+        }
+
+        val unhealthyMsg = if (allUnhealthy.nonEmpty) {
+          val joined = allUnhealthy.mkString("Services are unhealthy [", ", ", "]")
+          Some(joined)
+        } else None
+
+        val awaitingMsg = if (allAwaiting.nonEmpty) {
+          val joined = allAwaiting.mkString("Services are awaiting a healthy status [", ", ", "]")
+          Some(joined)
+        } else None
+
+        if (unhealthyMsg.isEmpty && awaitingMsg.isEmpty)
+          None
+        else
+          Some((unhealthyMsg ++ awaitingMsg).mkString(" AND "))
+      }
+
+      problemsF.flatMap {
+        case Some(errorMsg) =>
+          Logger[F].warn(s"Health probe returning 503: $errorMsg").as {
+            Response(status = Status.ServiceUnavailable)
+          }
+        case None =>
           Logger[F].debug("Health probe returning 200").as {
             Response(status = Status.Ok)
-          }
-        case Unhealthy(reason) =>
-          Logger[F].warn(s"Health probe returning 503: $reason").as {
-            Response(status = Status.ServiceUnavailable)
           }
       }
     }
