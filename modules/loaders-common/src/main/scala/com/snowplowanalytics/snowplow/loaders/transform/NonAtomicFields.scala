@@ -7,7 +7,8 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
-import cats.effect.Sync
+import cats.effect.Async
+import cats.effect.implicits._
 import cats.implicits._
 import com.snowplowanalytics.iglu.client.resolver.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.RegistryLookup
@@ -46,7 +47,7 @@ object NonAtomicFields {
     failure: FailureDetails.LoaderIgluError
   )
 
-  def resolveTypes[F[_]: Sync: RegistryLookup](
+  def resolveTypes[F[_]: Async: RegistryLookup](
     resolver: Resolver[F],
     entities: Map[TabledEntity, Set[SchemaSubVersion]],
     filterCriteria: List[SchemaCriterion]
@@ -61,7 +62,7 @@ object NonAtomicFields {
         // Remove whole schema family if there is no subversion left after filtering
         subVersions.nonEmpty
       }
-      .traverse { case (tabledEntity, subVersions) =>
+      .parTraverse { case (tabledEntity, subVersions) =>
         SchemaProvider
           .fetchSchemasWithSameModel(resolver, TabledEntity.toSchemaKey(tabledEntity, subVersions.max))
           .map(TypedTabledEntity.build(tabledEntity, subVersions, _))
