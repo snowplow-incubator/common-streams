@@ -16,10 +16,11 @@ object Dependencies {
     val catsRetry        = "3.1.3"
     val fs2              = "3.10.0"
     val log4cats         = "2.6.0"
-    val http4s           = "0.23.26"
+    val http4s           = "0.23.28"
+    val blaze            = "0.23.16"
     val decline          = "2.4.1"
-    val circe            = "0.14.6"
-    val circeExtra       = "0.14.3"
+    val circe            = "0.14.8"
+    val circeExtra       = "0.14.4"
     val circeConfig      = "0.10.1"
     val betterMonadicFor = "0.3.1"
     val kindProjector    = "0.13.2"
@@ -59,6 +60,7 @@ object Dependencies {
   val catsRetry         = "com.github.cb372"       %% "cats-retry"              % V.catsRetry
   val emberServer       = "org.http4s"             %% "http4s-ember-server"     % V.http4s
   val http4sCirce       = "org.http4s"             %% "http4s-circe"            % V.http4s
+  val blazeClient       = "org.http4s"             %% "http4s-blaze-client"     % V.blaze
   val decline           = "com.monovore"           %% "decline-effect"          % V.decline
   val circeConfig       = "io.circe"               %% "circe-config"            % V.circeConfig
   val circeGeneric      = "io.circe"               %% "circe-generic"           % V.circe
@@ -164,6 +166,7 @@ object Dependencies {
   )
 
   val runtimeCommonDependencies = Seq(
+    blazeClient,
     cats,
     catsEffectKernel,
     catsRetry,

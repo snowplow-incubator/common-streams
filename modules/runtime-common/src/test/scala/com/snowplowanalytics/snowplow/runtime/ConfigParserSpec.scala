@@ -154,7 +154,7 @@ class ConfigParserSpec extends Specification with CatsEffect {
   }
 
   def configMissingField = {
-    val expected = "Cannot resolve config: DecodingFailure at .field41: Missing required field"
+    val expected = "Cannot resolve config: DecodingFailure at .field4.field41: Missing required field"
     val path     = Paths.get("src/test/resources/config_parser_test/config_missing_field.hocon")
     ConfigParser
       .configFromFile[IO, TestConfig](path)
