@@ -9,7 +9,6 @@ package com.snowplowanalytics.snowplow.sources.kinesis
 
 import io.circe.literal._
 import com.typesafe.config.ConfigFactory
-import eu.timepit.refined.types.all.PosInt
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
 import io.circe.generic.semiauto._
@@ -40,7 +39,6 @@ class KinesisSourceConfigSpec extends Specification {
       "initialPosition": {
         "type": "TrimHorizon"
       },
-      "bufferSize": 42,
       "leaseDuration": "20 seconds"
     }
     """
@@ -52,7 +50,6 @@ class KinesisSourceConfigSpec extends Specification {
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
-        c.bufferSize.value must beEqualTo(42),
         c.leaseDuration must beEqualTo(20.seconds)
       ).reduce(_ and _)
     }
@@ -71,7 +68,6 @@ class KinesisSourceConfigSpec extends Specification {
       "initialPosition": {
         "type": "TRIM_HORIZON"
       },
-      "bufferSize": 42,
       "leaseDuration": "20 seconds"
     }
     """
@@ -83,7 +79,6 @@ class KinesisSourceConfigSpec extends Specification {
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
-        c.bufferSize.value must beEqualTo(42),
         c.leaseDuration must beEqualTo(20.seconds)
       ).reduce(_ and _)
     }
@@ -108,7 +103,6 @@ class KinesisSourceConfigSpec extends Specification {
       workerIdentifier         = System.getenv("HOSTNAME"),
       initialPosition          = KinesisSourceConfig.InitialPosition.Latest,
       retrievalMode            = KinesisSourceConfig.Retrieval.Polling(1000),
-      bufferSize               = PosInt.unsafeFrom(1),
       customEndpoint           = None,
       dynamodbCustomEndpoint   = None,
       cloudwatchCustomEndpoint = None,

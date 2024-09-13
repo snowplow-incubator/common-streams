@@ -248,18 +248,18 @@ private[sources] object LowLevelSource {
    */
   private def timedWindows[F[_]: Async, A](config: EventProcessingConfig.TimedWindows): Pipe[F, A, Stream[F, A]] = {
     def go(timedPull: Pull.Timed[F, A], current: Option[Queue[F, Option[A]]]): Pull[F, Stream[F, A], Unit] =
-      timedPull.uncons.flatMap {
-        case None =>
+      timedPull.uncons.attempt.flatMap {
+        case Right(None) =>
           current match {
             case None    => Pull.done
             case Some(q) => Pull.eval(q.offer(None)) >> Pull.done
           }
-        case Some((Left(_), next)) =>
+        case Right(Some((Left(_), next))) =>
           current match {
             case None    => go(next, None)
             case Some(q) => Pull.eval(q.offer(None)) >> go(next, None)
           }
-        case Some((Right(chunk), next)) =>
+        case Right(Some((Right(chunk), next))) =>
           current match {
             case None =>
               val pull = for {
@@ -271,6 +271,11 @@ private[sources] object LowLevelSource {
               pull.flatten
             case Some(q) =>
               Pull.eval(chunk.traverse(a => q.offer(Some(a)))) >> go(next, Some(q))
+          }
+        case Left(throwable) =>
+          current match {
+            case None    => Pull.raiseError[F](throwable)
+            case Some(q) => Pull.eval(q.offer(None)) >> Pull.raiseError[F](throwable)
           }
       }
 
