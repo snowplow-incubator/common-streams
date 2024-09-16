@@ -28,6 +28,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       return a merged schema if the batch uses all schemas in a series $ue3
       return nothing for the Iglu Central ad_break_end_event schema $ue4
       return a JSON field for the Iglu Central anything-a schema $ue5
+      return a field prefixed with underscore if field starts with a digit $ueDigit
 
     when resolving for known schemas in contexts should
       return an un-merged schema if the batch uses the first schema in a series $c1
@@ -195,6 +196,37 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
         (fields.head must beEqualTo(expected))
     }
 
+  }
+
+  def ueDigit = {
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "digit", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    val expected = {
+      val expectedStruct = Type.Struct(
+        NonEmptyVector.of(
+          Field("_1col_a", Type.String, Required).copy(accessors = Set("1col_a"))
+        )
+      )
+
+      val expectedField = Field("unstruct_event_myvendor_digit_1", expectedStruct, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 0)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must haveSize(1)) and
+        (fields.head must beEqualTo(expected))
+    }
   }
 
   def c1 = {
