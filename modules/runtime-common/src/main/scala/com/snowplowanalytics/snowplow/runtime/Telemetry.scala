@@ -19,7 +19,7 @@ import io.circe._
 import io.circe.syntax._
 import io.circe.config.syntax._
 import io.circe.generic.semiauto._
-import org.http4s.client.{Client => HttpClient}
+import org.http4s.client.{Client => Http4sClient}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
@@ -52,7 +52,7 @@ object Telemetry {
   def stream[F[_]: Async](
     config: Config,
     appInfo: AppInfo,
-    httpClient: HttpClient[F]
+    httpClient: Http4sClient[F]
   ): Stream[F, Nothing] =
     if (config.disable)
       Stream.never
@@ -72,7 +72,7 @@ object Telemetry {
   private def initTracker[F[_]: Async](
     config: Config,
     appName: String,
-    client: HttpClient[F]
+    client: Http4sClient[F]
   ): Resource[F, Tracker[F]] =
     for {
       implicit0(random: Random[F]) <- Resource.eval(Random.scalaUtilRandom)

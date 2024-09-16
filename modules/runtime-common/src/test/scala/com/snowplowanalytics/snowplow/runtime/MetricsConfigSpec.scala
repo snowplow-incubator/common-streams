@@ -132,7 +132,7 @@ class MetricsConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     result.as[StatsdWrapper] must beLeft.like { case e: DecodingFailure =>
-      e.show must beEqualTo("DecodingFailure at .prefix: Missing required field")
+      e.show must beEqualTo("DecodingFailure at .xyz.prefix: Missing required field")
     }
   }
 
