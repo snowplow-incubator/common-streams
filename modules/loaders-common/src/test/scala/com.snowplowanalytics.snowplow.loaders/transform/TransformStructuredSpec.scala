@@ -33,6 +33,11 @@ class TransformStructuredSpec extends Specification {
       Field("my_string", Type.String, Required)
     )
 
+  private val simpleOneFieldStartingWithDigitSchema =
+    NonEmptyVector.of(
+      Field("1my_string", Type.String, Required)
+    )
+
   private val schemaWithAllPossibleTypes =
     NonEmptyVector.of(
       Field("my_string", Type.String, Required),
@@ -71,7 +76,9 @@ class TransformStructuredSpec extends Specification {
     Successful transformation:
       Valid event with only atomic fields (no custom entities) $onlyAtomic
       Valid event with one custom context $oneContext
+      Valid event with one custom context starting with digit $oneContextDigit
       Valid unstruct event $unstruct
+      Valid unstruct event with field starting with digit $unstructDigit
       Valid event with two custom contexts, same major version $twoContextsSameMajor
       Valid event with two custom contexts, different major version $twoContextsDifferentMajor
       Valid event with each different type of atomic field $onlyAtomicAllTypes
@@ -120,6 +127,18 @@ class TransformStructuredSpec extends Specification {
     assertSuccessful(inputEvent, batchInfo, expectedAllEntities = expectedOutput)
   }
 
+  def unstructDigit = {
+    val inputEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "1my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+    val batchInfo = Result(
+      fields       = Vector(mySchemaUnstruct(model = 1, subVersions = Set((0, 0)), simpleOneFieldStartingWithDigitSchema)),
+      igluFailures = List.empty
+    )
+    val expectedOutput = List(NamedValue(name = "unstruct_event_com_example_my_schema_1", value = json"""{ "_1my_string": "abc"}"""))
+
+    assertSuccessful(inputEvent, batchInfo, expectedAllEntities = expectedOutput)
+  }
+
   def oneContext = {
     val inputEvent =
       createEvent(contexts = List(sdj(data = json"""{ "my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
@@ -129,6 +148,20 @@ class TransformStructuredSpec extends Specification {
     )
     val expectedOutput = List(
       NamedValue(name = "contexts_com_example_my_schema_1", value = json"""[{ "_schema_version": "1-0-0", "my_string": "abc"}]""")
+    )
+
+    assertSuccessful(inputEvent, batchInfo, expectedAllEntities = expectedOutput)
+  }
+
+  def oneContextDigit = {
+    val inputEvent =
+      createEvent(contexts = List(sdj(data = json"""{ "1my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+    val batchInfo = Result(
+      fields       = Vector(mySchemaContexts(model = 1, subVersions = Set((0, 0)), simpleOneFieldStartingWithDigitSchema)),
+      igluFailures = List.empty
+    )
+    val expectedOutput = List(
+      NamedValue(name = "contexts_com_example_my_schema_1", value = json"""[{ "_schema_version": "1-0-0", "_1my_string": "abc"}]""")
     )
 
     assertSuccessful(inputEvent, batchInfo, expectedAllEntities = expectedOutput)
