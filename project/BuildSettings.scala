@@ -112,8 +112,6 @@ object BuildSettings {
   )
 
   val igluTestSettings = Seq(
-    // TODO: Remove this dev repository after heartbeat schema is published
-    Test / igluRepository := "http://iglucentral-dev.com.s3-website-us-east-1.amazonaws.com/add-loader-heartbeat",
     Test / igluUris := Seq(
       // Iglu Central schemas used in tests will get pre-fetched by sbt
       "iglu:com.snowplowanalytics.iglu/anything-a/jsonschema/1-0-0",
