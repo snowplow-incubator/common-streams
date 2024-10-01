@@ -23,7 +23,8 @@ case class PubsubSourceConfig(
   minDurationPerAckExtension: FiniteDuration,
   maxDurationPerAckExtension: FiniteDuration,
   gcpUserAgent: GcpUserAgent,
-  shutdownTimeout: FiniteDuration
+  shutdownTimeout: FiniteDuration,
+  maxPullsPerTransportChannel: Int
 )
 
 object PubsubSourceConfig {
