@@ -21,7 +21,8 @@ import java.time.Instant
 import com.google.api.core.ApiService
 import com.google.api.gax.batching.FlowControlSettings
 import com.google.api.gax.core.FixedExecutorProvider
-import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber}
+import com.google.api.gax.grpc.ChannelPoolSettings
+import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber, SubscriptionAdminSettings}
 import com.google.common.util.concurrent.{ForwardingExecutorService, ListeningExecutorService, MoreExecutors}
 import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
 import org.threeten.bp.{Duration => ThreetenDuration}
@@ -191,6 +192,7 @@ object PubsubSource {
     for {
       direct <- executorResource(Sync[F].delay(MoreExecutors.newDirectExecutorService()))
       parallelPullCount = chooseNumParallelPulls(config)
+      channelCount      = chooseNumTransportChannels(config, parallelPullCount)
       executor <- executorResource(Sync[F].delay(Executors.newScheduledThreadPool(2 * parallelPullCount)))
       receiver = messageReceiver(config, control)
       name     = ProjectSubscriptionName.of(config.subscription.projectId, config.subscription.subscriptionId)
@@ -208,6 +210,16 @@ object PubsubSource {
                           FlowControlSettings.getDefaultInstance
                         }
                         .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
+                        .setChannelProvider {
+                          SubscriptionAdminSettings.defaultGrpcTransportProviderBuilder
+                            .setMaxInboundMessageSize(20 << 20) // copies Subscriber hard-coded default
+                            .setMaxInboundMetadataSize(20 << 20) // copies Subscriber hard-coded default
+                            .setKeepAliveTime(ThreetenDuration.ofMinutes(5)) // copies Subscriber hard-coded default
+                            .setChannelPoolSettings {
+                              ChannelPoolSettings.staticallySized(channelCount)
+                            }
+                            .build
+                        }
                         .build
                     })
       _ <- Resource.eval(Sync[F].delay {
@@ -324,6 +336,18 @@ object PubsubSource {
    */
   private def chooseNumParallelPulls(config: PubsubSourceConfig): Int =
     (Runtime.getRuntime.availableProcessors * config.parallelPullFactor)
+      .setScale(0, BigDecimal.RoundingMode.UP)
+      .toInt
+
+  /**
+   * Picks a sensible number of GRPC transport channels (roughly equivalent to a TCP connection)
+   *
+   * GRPC has a hard limit of 100 concurrent RPCs on a channel. And experience shows it is healthy
+   * to stay much under that limit. If we need to open a large number of streaming pulls then we
+   * might approach/exceed that limit.
+   */
+  private def chooseNumTransportChannels(config: PubsubSourceConfig, parallelPullCount: Int): Int =
+    (BigDecimal(parallelPullCount) / config.maxPullsPerTransportChannel)
       .setScale(0, BigDecimal.RoundingMode.UP)
       .toInt
 
