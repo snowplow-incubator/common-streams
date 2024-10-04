@@ -103,7 +103,7 @@ class WebhookConfigSpec extends Specification {
     val expected = Webhook.Config(
       endpoint  = Some(Uri.unsafeFromString("http://example.com/xyz?abc=123")),
       tags      = Map.empty,
-      heartbeat = 60.minutes
+      heartbeat = 5.minutes
     )
 
     result.as[ConfigWrapper] must beRight { (w: ConfigWrapper) =>
