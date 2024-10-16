@@ -58,8 +58,11 @@ object TypedTabledEntity {
     subVersions: Set[SchemaSubVersion],
     schemas: NonEmptyList[SelfDescribingSchema[Schema]]
   ): Option[TypedTabledEntity] =
-    schemas
-      .traverse(sds => fieldFromSchema(tabledEntity, sds.schema).map((_, sds)))
+    schemas.toList
+      .flatMap { sds =>
+        fieldFromSchema(tabledEntity, sds.schema).map((_, sds))
+      }
+      .toNel
       .map { nel =>
         val (rootField, rootSchema) = nel.head
         val tte                     = TypedTabledEntity(tabledEntity, rootField, Set(keyToSubVersion(rootSchema.self.schemaKey)), Nil)

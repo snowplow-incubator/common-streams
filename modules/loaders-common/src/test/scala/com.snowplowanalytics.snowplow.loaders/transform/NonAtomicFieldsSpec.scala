@@ -29,6 +29,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       return nothing for the Iglu Central ad_break_end_event schema $ue4
       return a JSON field for the Iglu Central anything-a schema $ue5
       return a field prefixed with underscore if field starts with a digit $ueDigit
+      return a merged schema if the batch has a schema with empty properties and additionalProperties=false $emptyProp
 
     when resolving for known schemas in contexts should
       return an un-merged schema if the batch uses the first schema in a series $c1
@@ -218,6 +219,37 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
         tabledEntity,
         expectedField,
         Set((0, 0)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must haveSize(1)) and
+        (fields.head must beEqualTo(expected))
+    }
+  }
+
+  def emptyProp = {
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "test_empty_prop", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 1), (0, 0))
+    )
+
+    val expected = {
+      val expectedStruct = Type.Struct(
+        NonEmptyVector.of(
+          Field("my_string", Type.String, Nullable).copy(accessors = Set("myString"))
+        )
+      )
+
+      val expectedField = Field("unstruct_event_myvendor_test_empty_prop_1", expectedStruct, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 1)),
         Nil
       )
     }
