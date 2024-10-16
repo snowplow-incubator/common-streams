@@ -13,6 +13,8 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
+      - name: Install sbt
+        uses: sbt/setup-sbt@v1
       - uses: actions/checkout@v4
       - uses: coursier/cache-action@v6
 
