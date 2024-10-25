@@ -27,10 +27,10 @@ object Dependencies {
     val collectionCompat = "2.11.0"
 
     // Streams
-    val fs2Kafka      = "3.4.0"
-    val pubsub        = "1.127.3"
-    val awsSdk2       = "2.25.16"
-    val kinesisClient = "2.5.7"
+    val fs2Kafka      = "3.5.1"
+    val pubsub        = "1.134.0"
+    val awsSdk2       = "2.29.0"
+    val kinesisClient = "2.6.0"
 
     // java
     val slf4j    = "2.0.12"
@@ -39,7 +39,7 @@ object Dependencies {
     // Snowplow
     val schemaDdl    = "0.25.0"
     val badrows      = "2.3.0"
-    val igluClient   = "3.2.0"
+    val igluClient   = "4.0.0"
     val tracker      = "2.0.0"
     val analyticsSdk = "3.2.1"
 
