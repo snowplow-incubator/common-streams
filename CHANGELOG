@@ -1,3 +1,19 @@
+Version 0.8.0 (2024-10-29)
+--------------------------
+Bump dependencies to latest versions
+Fix TypedTabledEntity build
+Install sbt in github actions
+Change default webhook heartbeat period to 5 minutes (#93)
+Pubsub source open more transport channels (#92)
+Remove temporary Iglu registry used for heartbeat tests (#90)
+Bump schema-ddl to 0.25.0 (#89)
+Http4s Client with configuration appropriate for common-streams apps (#87)
+Resolve schemas in parallel (#85)
+Re-implement Kinesis source without fs2-kinesis (#84)
+Refactor application health monitoring (#82)
+Bump iglu-scala-client to 3.2.0
+Webhook for sending alert messages (#81)
+
 Version 0.7.0 (2024-05-29)
 --------------------------
 Kinesis source must report its latency when KCL is not healthy (#77)
