@@ -39,8 +39,9 @@ class TransformUnstructuredSpec extends Specification {
     Create additional columns for unstruct events $e4
     Create additional columns for contexts, using different columns for different schemas $e5
     Create additional columns for contexts, using same column when schemas have same major version $e6
-    Transform values of event fields correctly $e7
-    Transform types of event fields correctly $e8
+    Create additional columns for contexts, using the anything-a schema with all possible types of JSON $e7
+    Transform values of event fields correctly $e8
+    Transform types of event fields correctly $e9
   """
 
   def e1 = {
@@ -255,14 +256,48 @@ class TransformUnstructuredSpec extends Specification {
     }
   }
 
-  def e7 =
+  def e7 = {
+
+    val contexts = SnowplowEvent.Contexts(
+      List(
+        SelfDescribingData[Json](anythingASchemaKey, json""""xyz""""), // string value
+        SelfDescribingData[Json](anythingASchemaKey, json"""42"""), // numeric value
+        SelfDescribingData[Json](anythingASchemaKey, json"""[1, 2, 3]"""), // array value
+        SelfDescribingData[Json](anythingASchemaKey, json"""{"abc": "xyz"}"""), // object value
+        SelfDescribingData[Json](anythingASchemaKey, json"""null""") // null value
+      )
+    )
+
+    val event = Event
+      .minimal(testEventId, testTimestamp, "0.0.0", "0.0.0")
+      .copy(contexts = contexts)
+
+    val result = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip)
+
+    val expected = NamedValue(
+      name = "contexts_com_snowplowanalytics_iglu_anything_a_1",
+      value = json"""[
+          "xyz",
+          42,
+          [1, 2, 3],
+          {"_schema_version": "1-0-0", "abc": "xyz"},
+          null
+        ]"""
+    )
+
+    result must beRight { namedValues: Vector[NamedValue[Json]] =>
+      namedValues must contain(expected).exactly(1.times)
+    }
+  }
+
+  def e8 =
     forall(genEvents(100)) { event =>
       val eventMap = getParams(event)
       val result   = Transform.transformEventUnstructured(badProcessor, TestCaster, TestCirceFolder, event, schemasToSkip).toOption.get
       forall(result)(c => c.value must beEqualTo(getFieldValueFromEvent(eventMap, c.name)))
     }
 
-  def e8 =
+  def e9 =
     forall(genEvents(100)) { event =>
       val eventMap = getParams(event)
       val result   = Transform.transformEventUnstructured(badProcessor, typeCaster, typeCirceFolder, event, schemasToSkip).toOption.get
@@ -279,9 +314,10 @@ object TransformUnstructuredSpec {
 
   val badProcessor = BadRowProcessor("snowflake-loader", "0.0.0")
 
-  val testSchemaKey701 = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/7-0-1").toOption.get
-  val testSchemaKey702 = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/7-0-2").toOption.get
-  val testSchemaKey801 = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/8-0-1").toOption.get
+  val testSchemaKey701   = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/7-0-1").toOption.get
+  val testSchemaKey702   = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/7-0-2").toOption.get
+  val testSchemaKey801   = SchemaKey.fromUri("iglu:com.example/mySchema/jsonschema/8-0-1").toOption.get
+  val anythingASchemaKey = SchemaKey.fromUri("iglu:com.snowplowanalytics.iglu/anything-a/jsonschema/1-0-0").toOption.get
 
   val typeCaster = new Caster[String] {
     override def nullValue: String                                                  = "null"

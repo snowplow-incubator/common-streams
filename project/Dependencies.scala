@@ -41,7 +41,7 @@ object Dependencies {
     val badrows      = "2.3.0"
     val igluClient   = "4.0.0"
     val tracker      = "2.0.0"
-    val analyticsSdk = "3.2.1"
+    val analyticsSdk = "3.2.2"
 
     // tests
     val specs2           = "4.20.0"
