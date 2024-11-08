@@ -1,3 +1,7 @@
+Version 0.8.1 (2024-11-08)
+--------------------------
+Fix for `_schema_version` overriding non-object entity data (#97)
+
 Version 0.8.0 (2024-10-29)
 --------------------------
 Bump dependencies to latest versions
