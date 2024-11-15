@@ -37,7 +37,7 @@ object Dependencies {
     val azureSdk = "1.11.4"
 
     // Snowplow
-    val schemaDdl    = "0.25.0"
+    val schemaDdl    = "0.26.0-M1"
     val badrows      = "2.3.0"
     val igluClient   = "4.0.0"
     val tracker      = "2.0.0"
