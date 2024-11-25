@@ -68,13 +68,16 @@ private[kinesis] object KCLScheduler {
               case KinesisSourceConfig.Retrieval.FanOut =>
                 new FanOutConfig(kinesisClient).streamName(kinesisConfig.streamName).applicationName(kinesisConfig.appName)
               case KinesisSourceConfig.Retrieval.Polling(maxRecords) =>
-                new PollingConfig(kinesisConfig.streamName, kinesisClient).maxRecords(maxRecords)
+                val c = new PollingConfig(kinesisConfig.streamName, kinesisClient).maxRecords(maxRecords)
+                c.recordsFetcherFactory.maxPendingProcessRecordsInput(1)
+                c
             }
           }
 
       val leaseManagementConfig =
         configsBuilder.leaseManagementConfig
           .failoverTimeMillis(kinesisConfig.leaseDuration.toMillis)
+          .maxLeasesToStealAtOneTime(chooseMaxLeasesToStealAtOneTime(kinesisConfig))
 
       // We ask to see empty batches, so that we can update the health check even when there are no records in the stream
       val processorConfig =
@@ -146,5 +149,15 @@ private[kinesis] object KCLScheduler {
         customized.build
       }
     }
+
+  /**
+   * In order to avoid latency during scale up/down and pod-rotation, we want the app to be quick to
+   * acquire shard-leases to process. With bigger instances (more cores) we tend to have more
+   * shard-leases per instance, so we increase how aggressively it acquires leases.
+   */
+  private def chooseMaxLeasesToStealAtOneTime(config: KinesisSourceConfig): Int =
+    (Runtime.getRuntime.availableProcessors * config.maxLeasesToStealAtOneTimeFactor)
+      .setScale(0, BigDecimal.RoundingMode.UP)
+      .toInt
 
 }

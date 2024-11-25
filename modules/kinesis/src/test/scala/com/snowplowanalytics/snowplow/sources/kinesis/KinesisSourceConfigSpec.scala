@@ -39,7 +39,8 @@ class KinesisSourceConfigSpec extends Specification {
       "initialPosition": {
         "type": "TrimHorizon"
       },
-      "leaseDuration": "20 seconds"
+      "leaseDuration": "20 seconds",
+      "maxLeasesToStealAtOneTimeFactor": 0.42
     }
     """
 
@@ -50,7 +51,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
-        c.leaseDuration must beEqualTo(20.seconds)
+        c.leaseDuration must beEqualTo(20.seconds),
+        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42))
       ).reduce(_ and _)
     }
   }
@@ -68,7 +70,8 @@ class KinesisSourceConfigSpec extends Specification {
       "initialPosition": {
         "type": "TRIM_HORIZON"
       },
-      "leaseDuration": "20 seconds"
+      "leaseDuration": "20 seconds",
+      "maxLeasesToStealAtOneTimeFactor": 0.42
     }
     """
 
@@ -79,7 +82,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
-        c.leaseDuration must beEqualTo(20.seconds)
+        c.leaseDuration must beEqualTo(20.seconds),
+        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42))
       ).reduce(_ and _)
     }
   }
@@ -98,15 +102,16 @@ class KinesisSourceConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     val expected = KinesisSourceConfig(
-      appName                  = "my-app",
-      streamName               = "my-stream",
-      workerIdentifier         = System.getenv("HOSTNAME"),
-      initialPosition          = KinesisSourceConfig.InitialPosition.Latest,
-      retrievalMode            = KinesisSourceConfig.Retrieval.Polling(1000),
-      customEndpoint           = None,
-      dynamodbCustomEndpoint   = None,
-      cloudwatchCustomEndpoint = None,
-      leaseDuration            = 10.seconds
+      appName                         = "my-app",
+      streamName                      = "my-stream",
+      workerIdentifier                = System.getenv("HOSTNAME"),
+      initialPosition                 = KinesisSourceConfig.InitialPosition.Latest,
+      retrievalMode                   = KinesisSourceConfig.Retrieval.Polling(1000),
+      customEndpoint                  = None,
+      dynamodbCustomEndpoint          = None,
+      cloudwatchCustomEndpoint        = None,
+      leaseDuration                   = 10.seconds,
+      maxLeasesToStealAtOneTimeFactor = BigDecimal(2.0)
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

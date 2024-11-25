@@ -79,13 +79,14 @@ object KinesisSource {
     Sync[F].realTime.flatMap(now => liveness.set(now))
 
   private def provideNextChunk(shardId: String, input: ProcessRecordsInput) = {
-    val chunk      = Chunk.javaList(input.records()).map(_.data())
-    val lastRecord = input.records.asScala.last // last is safe because we handled the empty case above
+    val chunk       = Chunk.javaList(input.records()).map(_.data())
+    val lastRecord  = input.records.asScala.last // last is safe because we handled the empty case above
+    val firstRecord = input.records.asScala.head
     val checkpointable = Checkpointable.Record(
       new ExtendedSequenceNumber(lastRecord.sequenceNumber, lastRecord.subSequenceNumber),
       input.checkpointer
     )
-    LowLevelEvents(chunk, Map[String, Checkpointable](shardId -> checkpointable), Some(lastRecord.approximateArrivalTimestamp))
+    LowLevelEvents(chunk, Map[String, Checkpointable](shardId -> checkpointable), Some(firstRecord.approximateArrivalTimestamp))
   }
 
   private def handleShardEnd[F[_]: Sync](
