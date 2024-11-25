@@ -16,6 +16,26 @@ import java.net.URI
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
 
+/**
+ * Config to be supplied from the app's hocon
+ *
+ * @param appName
+ *   Corresponds to the DynamoDB table name
+ * @param workerIdentifier
+ *   If a pod uses a consistent name, then whenever the pod restarts (e.g. after crashing or after a
+ *   rollout) then the pod can re-claim leases that it previously owned before the restart
+ * @param leaseDuration
+ *   The KCL default for a lease is 10 seconds. If we increase this, then we can allow a pod longer
+ *   to re-claim its old leases after a restart.
+ * @param maxLeasesToStealAtOneTimeFactor
+ *   Controls how to pick the max number of leases to steal at one time. The actual max number to
+ *   steal is multiplied by the number of runtime processors. In order to avoid latency during scale
+ *   up/down and pod-rotation, we want the app to be quick to acquire shard-leases to process. With
+ *   bigger instances (more cores/processors) we tend to have more shard-leases per instance, so we
+ *   increase how aggressively it acquires leases.
+ *
+ * Other params are self-explanatory
+ */
 case class KinesisSourceConfig(
   appName: String,
   streamName: String,
@@ -25,7 +45,8 @@ case class KinesisSourceConfig(
   customEndpoint: Option[URI],
   dynamodbCustomEndpoint: Option[URI],
   cloudwatchCustomEndpoint: Option[URI],
-  leaseDuration: FiniteDuration
+  leaseDuration: FiniteDuration,
+  maxLeasesToStealAtOneTimeFactor: BigDecimal
 )
 
 object KinesisSourceConfig {
