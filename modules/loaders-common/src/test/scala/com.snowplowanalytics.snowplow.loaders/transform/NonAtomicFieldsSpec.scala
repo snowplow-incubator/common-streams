@@ -30,6 +30,7 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       return a JSON field for the Iglu Central anything-a schema $ue5
       return a field prefixed with underscore if field starts with a digit $ueDigit
       return a merged schema if the batch has a schema with empty properties and additionalProperties=false $emptyProp
+      return a merged struct with field order prioritizing original fields before new additions $fieldOrder
 
     when resolving for known schemas in contexts should
       return an un-merged schema if the batch uses the first schema in a series $c1
@@ -96,8 +97,8 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       val expectedStruct = Type.Struct(
         NonEmptyVector.of(
           Field("col_a", Type.String, Required),
-          Field("col_c", Type.String, Nullable),
-          Field("col_b", Type.String, Nullable)
+          Field("col_b", Type.String, Nullable),
+          Field("col_c", Type.String, Nullable)
         )
       )
 
@@ -131,8 +132,8 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       val expectedStruct = Type.Struct(
         NonEmptyVector.of(
           Field("col_a", Type.String, Required),
-          Field("col_c", Type.String, Nullable),
-          Field("col_b", Type.String, Nullable)
+          Field("col_b", Type.String, Nullable),
+          Field("col_c", Type.String, Nullable)
         )
       )
 
@@ -261,6 +262,44 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
     }
   }
 
+  def fieldOrder = {
+
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "myschema", 10)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0), (0, 1))
+    )
+
+    val expected = {
+      val expectedStruct = Type.Struct(
+        NonEmptyVector.of(
+          // original fields
+          Field("col_m", Type.String, Nullable),
+          Field("col_n", Type.String, Nullable),
+          // newly added fields
+          Field("col_a", Type.String, Nullable), // earlier alphabetically
+          Field("col_z", Type.String, Nullable) // later alphabetically
+        )
+      )
+
+      val expectedField = Field("unstruct_event_myvendor_myschema_10", expectedStruct, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 0), (0, 1)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
+      (failures must beEmpty) and
+        (fields must haveSize(1)) and
+        (fields.head must beEqualTo(expected))
+    }
+
+  }
+
   def c1 = {
 
     val tabledEntity = TabledEntity(TabledEntity.Context, "myvendor", "myschema", 7)
@@ -310,8 +349,8 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
         NonEmptyVector.of(
           Field("_schema_version", Type.String, Required),
           Field("col_a", Type.String, Required),
-          Field("col_c", Type.String, Nullable),
-          Field("col_b", Type.String, Nullable)
+          Field("col_b", Type.String, Nullable),
+          Field("col_c", Type.String, Nullable)
         )
       )
 
@@ -349,8 +388,8 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
         NonEmptyVector.of(
           Field("_schema_version", Type.String, Required),
           Field("col_a", Type.String, Required),
-          Field("col_c", Type.String, Nullable),
-          Field("col_b", Type.String, Nullable)
+          Field("col_b", Type.String, Nullable),
+          Field("col_c", Type.String, Nullable)
         )
       )
 

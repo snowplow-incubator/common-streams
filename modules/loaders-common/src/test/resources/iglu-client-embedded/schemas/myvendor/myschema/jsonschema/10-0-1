@@ -1,0 +1,15 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "self": {
+    "vendor": "myvendor",
+    "name": "myschema",
+    "format": "jsonschema",
+    "version": "10-0-1"
+  },
+  "type": "object",
+  "properties": {
+    "col_a": {"type": "string"},
+    "col_m": {"type": "string"},
+    "col_z": {"type": "string"}
+  }
+}
