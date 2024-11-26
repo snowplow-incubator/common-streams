@@ -95,7 +95,8 @@ object Utils {
     Some(endpoint),
     Some(endpoint),
     Some(endpoint),
-    10.seconds
+    10.seconds,
+    BigDecimal(1.0)
   )
 
   def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfig(
