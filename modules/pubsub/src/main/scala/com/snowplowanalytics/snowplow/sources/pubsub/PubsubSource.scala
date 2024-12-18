@@ -7,325 +7,254 @@
  */
 package com.snowplowanalytics.snowplow.sources.pubsub
 
-import cats.effect.{Async, Resource, Sync}
-import cats.effect.implicits._
+import cats.effect.{Async, Deferred, Ref, Resource, Sync}
+import cats.effect.kernel.Unique
 import cats.implicits._
 import fs2.{Chunk, Stream}
-import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
+import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import java.nio.ByteBuffer
 import java.time.Instant
 
 // pubsub
-import com.google.api.core.ApiService
-import com.google.api.gax.batching.FlowControlSettings
-import com.google.api.gax.core.FixedExecutorProvider
+import com.google.api.gax.core.{ExecutorProvider, FixedExecutorProvider}
 import com.google.api.gax.grpc.ChannelPoolSettings
-import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber, SubscriptionAdminSettings}
-import com.google.common.util.concurrent.{ForwardingExecutorService, ListeningExecutorService, MoreExecutors}
-import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
+import com.google.cloud.pubsub.v1.SubscriptionAdminSettings
+import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings
+import com.google.pubsub.v1.{PullRequest, PullResponse}
+import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 // snowplow
-import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
+import com.snowplowanalytics.snowplow.pubsub.{FutureInterop, GcpUserAgent}
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
+import com.snowplowanalytics.snowplow.sources.pubsub.PubsubRetryOps.implicits._
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.jdk.CollectionConverters._
 
-import java.util.concurrent.{
-  Callable,
-  ExecutorService,
-  Executors,
-  Phaser,
-  ScheduledExecutorService,
-  ScheduledFuture,
-  Semaphore,
-  TimeUnit,
-  TimeoutException
-}
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.{ExecutorService, Executors}
 
+/**
+ * A common-streams `Source` that pulls messages from PubSub
+ *
+ * This Source is a wrapper around a GRPC stub. It uses the "Unary Pull" GRPC method to fetch
+ * events.
+ *
+ * Note that "Unary Pull" GRPC is different to the "Streaming Pull" GRPC used by the 3rd-party
+ * java-pubsub library. We use "Unary Pull" to avoid a problem in which PubSub occasionally
+ * re-delivers the same messages, causing downstream duplicates. The problem happened especially in
+ * apps like Lake Loader, which builds up a very large number of un-acked messages and then acks
+ * them all in one go at the end of a timed window.
+ */
 object PubsubSource {
 
-  private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   def build[F[_]: Async](config: PubsubSourceConfig): F[SourceAndAck[F]] =
-    LowLevelSource.toSourceAndAck(lowLevel(config))
+    Deferred[F, PubsubCheckpointer.Resources[F]].flatMap { deferred =>
+      LowLevelSource.toSourceAndAck(lowLevel(config, deferred))
+    }
 
-  private type PubSubCheckpointer[F[_]] = Checkpointer[F, Chunk[AckReplyConsumer]]
+  private def lowLevel[F[_]: Async](
+    config: PubsubSourceConfig,
+    deferredResources: Deferred[F, PubsubCheckpointer.Resources[F]]
+  ): LowLevelSource[F, Vector[Unique.Token]] =
+    new LowLevelSource[F, Vector[Unique.Token]] {
+      def checkpointer: Checkpointer[F, Vector[Unique.Token]] = new PubsubCheckpointer(config.subscription, deferredResources)
 
-  private def lowLevel[F[_]: Async](config: PubsubSourceConfig): LowLevelSource[F, Chunk[AckReplyConsumer]] =
-    new LowLevelSource[F, Chunk[AckReplyConsumer]] {
-      def checkpointer: PubSubCheckpointer[F] = pubsubCheckpointer
-
-      def stream: Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
-        pubsubStream(config)
+      def stream: Stream[F, Stream[F, LowLevelEvents[Vector[Unique.Token]]]] =
+        pubsubStream(config, deferredResources)
 
       def lastLiveness: F[FiniteDuration] =
         Sync[F].realTime
     }
 
-  private def pubsubCheckpointer[F[_]: Async]: PubSubCheckpointer[F] = new PubSubCheckpointer[F] {
-    def combine(x: Chunk[AckReplyConsumer], y: Chunk[AckReplyConsumer]): Chunk[AckReplyConsumer] =
-      Chunk.Queue(x, y)
-
-    val empty: Chunk[AckReplyConsumer] = Chunk.empty
-    def ack(c: Chunk[AckReplyConsumer]): F[Unit] =
-      Sync[F].delay {
-        c.foreach(_.ack())
-      }
-
-    def nack(c: Chunk[AckReplyConsumer]): F[Unit] =
-      Sync[F].delay {
-        c.foreach(_.nack())
-      }
-  }
-
-  private case class SingleMessage(
-    message: ByteBuffer,
-    ackReply: AckReplyConsumer,
-    tstamp: Instant
-  )
+  private def pubsubStream[F[_]: Async](
+    config: PubsubSourceConfig,
+    deferredResources: Deferred[F, PubsubCheckpointer.Resources[F]]
+  ): Stream[F, Stream[F, LowLevelEvents[Vector[Unique.Token]]]] =
+    for {
+      parallelPullCount <- Stream.eval(Sync[F].delay(chooseNumParallelPulls(config)))
+      stub <- Stream.resource(stubResource(config))
+      refStates <- Stream.eval(Ref[F].of(Map.empty[Unique.Token, PubsubBatchState]))
+      _ <- Stream.eval(deferredResources.complete(PubsubCheckpointer.Resources(stub, refStates)))
+    } yield Stream
+      .fixedRateStartImmediately(config.debounceRequests, dampen = true)
+      .parEvalMapUnordered(parallelPullCount)(_ => pullAndManageState(config, stub, refStates))
+      .unNone
+      .repeat
+      .prefetchN(parallelPullCount)
+      .concurrently(extendDeadlines(config, stub, refStates))
+      .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
 
   /**
-   * The toolkit for coordinating concurrent operations between the message receiver and the fs2
-   * stream. This is the interface between FS2 and non-FS2 worlds.
+   * Pulls a batch of messages from pubsub and then manages the state of the batch
    *
-   * We use pure Java (non-cats-effect) classes so we can use them in the message receiver without
-   * needing to use a cats-effect Dispatcher.
+   * Managing state of the batch includes:
    *
-   * @param queue
-   *   A List of messages that have been provided by the Pubsub Subscriber. The FS2 stream should
-   *   periodically drain this queue.
-   * @param semaphore
-   *   A Semaphore used to manage how many bytes are being held in memory. When the queue holds too
-   *   many bytes, the semaphore will block on acquiring more permits. This is needed because we
-   *   have turned off FlowControl in the subscriber.
-   * @param phaser
-   *   A Phaser that advances each time the queue has new messages to be consumed. The FS2 stream
-   *   can wait on the phaser instead of repeatedly pooling the queue.
-   * @param errorRef
-   *   Any error provided to us by the pubsub Subscriber. If the FS2 stream sees an error here, then
-   *   it should raise the error.
+   *   - Extend the ack deadline, which gives us some time to process this batch.
+   *   - Generate a unique token by which to identify this batch internally
+   *   - Add the batch to the local "State" so that we can re-extend the ack deadline if needed
    */
-  private case class Control(
-    queue: AtomicReference[List[SingleMessage]],
-    semaphore: Semaphore,
-    phaser: Phaser,
-    errorRef: AtomicReference[Option[Throwable]]
-  )
-
-  private object Control {
-    def build[F[_]: Sync](config: PubsubSourceConfig): F[Control] = Sync[F].delay {
-      Control(
-        new AtomicReference(Nil),
-        new Semaphore(config.bufferMaxBytes, false),
-        new Phaser(2),
-        new AtomicReference(None)
-      )
+  private def pullAndManageState[F[_]: Async](
+    config: PubsubSourceConfig,
+    stub: SubscriberStub,
+    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+  ): F[Option[LowLevelEvents[Vector[Unique.Token]]]] =
+    pullFromSubscription(config, stub).flatMap { response =>
+      if (response.getReceivedMessagesCount > 0) {
+        val records = response.getReceivedMessagesList.asScala.toVector
+        val chunk   = Chunk.from(records.map(_.getMessage.getData.asReadOnlyByteBuffer()))
+        val (tstampSeconds, tstampNanos) =
+          records.map(r => (r.getMessage.getPublishTime.getSeconds, r.getMessage.getPublishTime.getNanos)).min
+        val ackIds = records.map(_.getAckId)
+        Sync[F].uncancelable { _ =>
+          for {
+            _ <- Logger[F].trace {
+                   records.map(_.getMessage.getMessageId).mkString("Pubsub message IDs: ", ",", "")
+                 }
+            timeReceived <- Sync[F].realTimeInstant
+            _ <- Utils.modAck[F](config.subscription, stub, ackIds, config.durationPerAckExtension)
+            token <- Unique[F].unique
+            currentDeadline = timeReceived.plusMillis(config.durationPerAckExtension.toMillis)
+            _ <- refStates.update(_ + (token -> PubsubBatchState(currentDeadline, ackIds)))
+          } yield Some(LowLevelEvents(chunk, Vector(token), Some(Instant.ofEpochSecond(tstampSeconds, tstampNanos.toLong))))
+        }
+      } else {
+        none.pure[F]
+      }
     }
+
+  /**
+   * "Nacks" any message that was pulled from pubsub but never consumed by the app.
+   *
+   * This is called during graceful shutdown. It allows PubSub to immediately re-deliver the
+   * messages to a different pod; instead of waiting for the ack deadline to expire.
+   */
+  private def nackRefStatesForShutdown[F[_]: Async](
+    config: PubsubSourceConfig,
+    stub: SubscriberStub,
+    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+  ): F[Unit] =
+    refStates.getAndSet(Map.empty).flatMap { m =>
+      Utils.modAck(config.subscription, stub, m.values.flatMap(_.ackIds.toVector).toVector, Duration.Zero)
+    }
+
+  /**
+   * Wrapper around the "Pull" PubSub GRPC.
+   *
+   * @return
+   *   The PullResponse, comprising a batch of pubsub messages
+   */
+  private def pullFromSubscription[F[_]: Async](
+    config: PubsubSourceConfig,
+    stub: SubscriberStub
+  ): F[PullResponse] = {
+    val request = PullRequest.newBuilder
+      .setSubscription(config.subscription.show)
+      .setMaxMessages(config.maxMessagesPerPull)
+      .build
+    val io = for {
+      apiFuture <- Sync[F].delay(stub.pullCallable.futureCall(request))
+      res <- FutureInterop.fromFuture[F, PullResponse](apiFuture)
+    } yield res
+    Logger[F].debug("Pulling from subscription") *>
+      io.retryingOnTransientGrpcFailures
+        .flatTap { response =>
+          Logger[F].debug(s"Pulled ${response.getReceivedMessagesCount} messages")
+        }
   }
 
-  private def pubsubStream[F[_]: Async](config: PubsubSourceConfig): Stream[F, Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]]] =
-    for {
-      control <- Stream.eval(Control.build(config))
-      _ <- Stream.resource(runSubscriber(config, control))
-    } yield consumeFromQueue(config, control)
-
-  private def consumeFromQueue[F[_]: Sync](
+  /**
+   * Modify ack deadlines if we need more time to process the messages
+   *
+   * @param config
+   *   The Source configuration
+   * @param stub
+   *   The GRPC stub on which we can issue modack requests
+   * @param refStates
+   *   A map from tokens to the data held about a batch of messages received from pubsub. This
+   *   function must update the state if it extends a deadline.
+   */
+  private def extendDeadlines[F[_]: Async](
     config: PubsubSourceConfig,
-    control: Control
-  ): Stream[F, LowLevelEvents[Chunk[AckReplyConsumer]]] =
+    stub: SubscriberStub,
+    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+  ): Stream[F, Nothing] =
     Stream
-      .repeatEval {
-        Sync[F].delay(control.errorRef.get).flatMap {
-          case None            => Sync[F].unit
-          case Some(throwable) => Sync[F].raiseError[Unit](throwable)
+      .eval(Sync[F].realTimeInstant)
+      .evalMap { now =>
+        val minAllowedDeadline = now.plusMillis((config.minRemainingAckDeadline.toDouble * config.durationPerAckExtension.toMillis).toLong)
+        val newDeadline        = now.plusMillis(config.durationPerAckExtension.toMillis)
+        refStates.modify { m =>
+          val toExtend = m.filter { case (_, batchState) =>
+            batchState.currentDeadline.isBefore(minAllowedDeadline)
+          }
+          val fixed = toExtend.view.map { case (k, v) =>
+            k -> v.copy(currentDeadline = newDeadline)
+          }.toMap
+          (m ++ fixed, toExtend.values.toVector)
         }
       }
-      .evalMap { _ =>
-        // Semantically block until message receive has written at least one message
-        val waitForData = Sync[F].interruptible {
-          control.phaser.awaitAdvanceInterruptibly(control.phaser.arrive())
-        }
-        Sync[F].uncancelable { poll =>
-          poll(waitForData) *> Sync[F].delay(control.queue.getAndSet(Nil))
-        }
-      }
-      .filter(_.nonEmpty) // Would happen if phaser was terminated
-      .map { list =>
-        val events         = Chunk.iterator(list.iterator.map(_.message))
-        val acks           = Chunk.iterator(list.iterator.map(_.ackReply))
-        val earliestTstamp = list.iterator.map(_.tstamp).min
-        LowLevelEvents(events, acks, Some(earliestTstamp))
-      }
-      .evalTap { case LowLevelEvents(events, _, _) =>
-        val numPermits = events.foldLeft(0) { case (numPermits, e) =>
-          numPermits + permitsFor(config, e.remaining())
-        }
-        Sync[F].delay {
-          control.semaphore.release(numPermits)
+      .evalMap { toExtend =>
+        if (toExtend.isEmpty)
+          // If no message had a deadline close to expiry, then sleep for an appropriate amount of time and check again
+          Sync[F].sleep(0.5 * config.minRemainingAckDeadline.toDouble * config.durationPerAckExtension)
+        else {
+          val ackIds = toExtend.sortBy(_.currentDeadline).flatMap(_.ackIds)
+          Utils.modAck[F](config.subscription, stub, ackIds, config.durationPerAckExtension)
         }
       }
+      .repeat
+      .drain
 
   /**
-   * Number of semaphore permits needed to write an event to the buffer.
+   * Builds the "Stub" which is the object from which we can call PubSub SDK methods
    *
-   *   - For small/medium events, this equals the size of the event in bytes.
-   *   - For large events, there are not enough permits available for the event in bytes, so return
-   *     the number of available permits.
+   * This implementation has some hard-coded values, which have been copied over from the equivalent
+   * hard-coded values in the java-pubsub client library.
    */
-  private def permitsFor(config: PubsubSourceConfig, bytes: Int): Int =
-    Math.min(config.bufferMaxBytes, bytes)
-
-  private def errorListener(phaser: Phaser, errorRef: AtomicReference[Option[Throwable]]): ApiService.Listener =
-    new ApiService.Listener {
-      override def failed(from: ApiService.State, failure: Throwable): Unit = {
-        errorRef.compareAndSet(None, Some(failure))
-        phaser.forceTermination()
-      }
-    }
-
-  private def runSubscriber[F[_]: Async](config: PubsubSourceConfig, control: Control): Resource[F, Unit] =
-    for {
-      direct <- executorResource(Sync[F].delay(MoreExecutors.newDirectExecutorService()))
-      parallelPullCount = chooseNumParallelPulls(config)
-      channelCount      = chooseNumTransportChannels(config, parallelPullCount)
-      executor <- executorResource(Sync[F].delay(Executors.newScheduledThreadPool(2 * parallelPullCount)))
-      receiver = messageReceiver(config, control)
-      name     = ProjectSubscriptionName.of(config.subscription.projectId, config.subscription.subscriptionId)
-      subscriber <- Resource.eval(Sync[F].delay {
-                      Subscriber
-                        .newBuilder(name, receiver)
-                        .setMaxAckExtensionPeriod(convertDuration(config.maxAckExtensionPeriod))
-                        .setMaxDurationPerAckExtension(convertDuration(config.maxDurationPerAckExtension))
-                        .setMinDurationPerAckExtension(convertDuration(config.minDurationPerAckExtension))
-                        .setParallelPullCount(parallelPullCount)
-                        .setExecutorProvider(FixedExecutorProvider.create(executorForEventCallbacks(direct, executor)))
-                        .setSystemExecutorProvider(FixedExecutorProvider.create(executor))
-                        .setFlowControlSettings {
-                          // Switch off any flow control, because we handle it ourselves with the semaphore
-                          FlowControlSettings.getDefaultInstance
-                        }
-                        .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
-                        .setChannelProvider {
-                          SubscriptionAdminSettings.defaultGrpcTransportProviderBuilder
-                            .setMaxInboundMessageSize(20 << 20) // copies Subscriber hard-coded default
-                            .setMaxInboundMetadataSize(20 << 20) // copies Subscriber hard-coded default
-                            .setKeepAliveTime(ThreetenDuration.ofMinutes(5)) // copies Subscriber hard-coded default
-                            .setChannelPoolSettings {
-                              ChannelPoolSettings.staticallySized(channelCount)
-                            }
-                            .build
-                        }
-                        .build
-                    })
-      _ <- Resource.eval(Sync[F].delay {
-             subscriber.addListener(errorListener(control.phaser, control.errorRef), MoreExecutors.directExecutor)
-           })
-      apiService <- Resource.make(Sync[F].delay(subscriber.startAsync())) { apiService =>
-                      for {
-                        _ <- Logger[F].info("Stopping the PubSub Subscriber...")
-                        _ <- Sync[F].delay(apiService.stopAsync())
-                        fiber <- drainQueue(control).start
-                        _ <- Logger[F].info("Waiting for the PubSub Subscriber to finish cleanly...")
-                        _ <- Sync[F]
-                               .blocking(apiService.awaitTerminated(config.shutdownTimeout.toMillis, TimeUnit.MILLISECONDS))
-                               .attemptNarrow[TimeoutException]
-                        _ <- Sync[F].delay(control.phaser.forceTermination())
-                        _ <- fiber.join
-                      } yield ()
-                    }
-      _ <- Resource.eval(Sync[F].blocking(apiService.awaitRunning()))
-    } yield ()
-
-  private def drainQueue[F[_]: Async](control: Control): F[Unit] =
-    Async[F].untilDefinedM {
-      for {
-        _ <- Sync[F].delay(control.semaphore.release(Int.MaxValue - control.semaphore.availablePermits()))
-        phase <- Sync[F].blocking(control.phaser.arriveAndAwaitAdvance())
-        messages <- Sync[F].delay(control.queue.getAndSet(Nil))
-        _ <- pubsubCheckpointer.nack(Chunk.from(messages.map(_.ackReply)))
-      } yield if (phase < 0) None else Some(())
-    }
-
-  private def messageReceiver(
+  private def buildSubscriberStub[F[_]: Sync](
     config: PubsubSourceConfig,
-    control: Control
-  ): MessageReceiver =
-    new MessageReceiver {
-      def receiveMessage(message: PubsubMessage, ackReply: AckReplyConsumer): Unit = {
-        val tstamp          = Instant.ofEpochSecond(message.getPublishTime.getSeconds, message.getPublishTime.getNanos.toLong)
-        val singleMessage   = SingleMessage(message.getData.asReadOnlyByteBuffer(), ackReply, tstamp)
-        val permitsRequired = permitsFor(config, singleMessage.message.remaining())
-        control.semaphore.acquire(permitsRequired)
-        val previousQueue = control.queue.getAndUpdate(list => singleMessage :: list)
-        if (previousQueue.isEmpty) {
-          control.phaser.arrive()
-        }
-        ()
+    executorProvider: ExecutorProvider
+  ): Resource[F, GrpcSubscriberStub] = {
+    val channelProvider = SubscriptionAdminSettings
+      .defaultGrpcTransportProviderBuilder()
+      .setMaxInboundMessageSize(20 << 20)
+      .setMaxInboundMetadataSize(20 << 20)
+      .setKeepAliveTime(ThreetenDuration.ofMinutes(5))
+      .setChannelPoolSettings {
+        ChannelPoolSettings.staticallySized(1)
       }
-    }
+      .build
+
+    val stubSettings = SubscriberStubSettings
+      .newBuilder()
+      .setBackgroundExecutorProvider(executorProvider)
+      .setCredentialsProvider(SubscriptionAdminSettings.defaultCredentialsProviderBuilder().build())
+      .setTransportChannelProvider(channelProvider)
+      .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
+      .setEndpoint(SubscriberStubSettings.getDefaultEndpoint())
+      .build
+
+    Resource.make(Sync[F].delay(GrpcSubscriberStub.create(stubSettings)))(stub => Sync[F].blocking(stub.shutdownNow))
+  }
+
+  /**
+   * Wraps the Stub in a Resource, for managing lifecycle
+   */
+  private def stubResource[F[_]: Async](
+    config: PubsubSourceConfig
+  ): Resource[F, SubscriberStub] =
+    for {
+      executor <- executorResource(Sync[F].delay(Executors.newScheduledThreadPool(2)))
+      subStub <- buildSubscriberStub(config, FixedExecutorProvider.create(executor))
+    } yield subStub
 
   private def executorResource[F[_]: Sync, E <: ExecutorService](make: F[E]): Resource[F, E] =
     Resource.make(make)(es => Sync[F].blocking(es.shutdown()))
-
-  /**
-   * The ScheduledExecutorService to be used for processing events.
-   *
-   * We execute the callback on a `DirectExecutor`, which means the underlying Subscriber runs it
-   * directly on its system executor. When the queue is full, this means we deliberately block the
-   * system exeuctor. We need to do this trick because we have disabled FlowControl. This trick is
-   * our own version of flow control.
-   */
-  private def executorForEventCallbacks(
-    directExecutor: ListeningExecutorService,
-    systemExecutor: ScheduledExecutorService
-  ): ScheduledExecutorService =
-    new ForwardingExecutorService with ScheduledExecutorService {
-
-      /**
-       * Non-scheduled tasks (e.g. when a message is received), are run directly, without jumping to
-       * another thread pool
-       */
-      override val delegate = directExecutor
-
-      /**
-       * Scheduled tasks (if they exist) are scheduled on the same thread pool shared by the system
-       * executor. As far as I know, these schedule methods never get called.
-       */
-      override def schedule[V](
-        callable: Callable[V],
-        delay: Long,
-        unit: TimeUnit
-      ): ScheduledFuture[V] =
-        systemExecutor.schedule(callable, delay, unit)
-      override def schedule(
-        runnable: Runnable,
-        delay: Long,
-        unit: TimeUnit
-      ): ScheduledFuture[_] =
-        systemExecutor.schedule(runnable, delay, unit)
-      override def scheduleAtFixedRate(
-        runnable: Runnable,
-        initialDelay: Long,
-        period: Long,
-        unit: TimeUnit
-      ): ScheduledFuture[_] =
-        systemExecutor.scheduleAtFixedRate(runnable, initialDelay, period, unit)
-      override def scheduleWithFixedDelay(
-        runnable: Runnable,
-        initialDelay: Long,
-        delay: Long,
-        unit: TimeUnit
-      ): ScheduledFuture[_] =
-        systemExecutor.scheduleWithFixedDelay(runnable, initialDelay, delay, unit)
-    }
-
-  private def convertDuration(d: FiniteDuration): ThreetenDuration =
-    ThreetenDuration.ofMillis(d.toMillis)
 
   /**
    * Converts `parallelPullFactor` to a suggested number of parallel pulls
@@ -336,18 +265,6 @@ object PubsubSource {
    */
   private def chooseNumParallelPulls(config: PubsubSourceConfig): Int =
     (Runtime.getRuntime.availableProcessors * config.parallelPullFactor)
-      .setScale(0, BigDecimal.RoundingMode.UP)
-      .toInt
-
-  /**
-   * Picks a sensible number of GRPC transport channels (roughly equivalent to a TCP connection)
-   *
-   * GRPC has a hard limit of 100 concurrent RPCs on a channel. And experience shows it is healthy
-   * to stay much under that limit. If we need to open a large number of streaming pulls then we
-   * might approach/exceed that limit.
-   */
-  private def chooseNumTransportChannels(config: PubsubSourceConfig, parallelPullCount: Int): Int =
-    (BigDecimal(parallelPullCount) / config.maxPullsPerTransportChannel)
       .setScale(0, BigDecimal.RoundingMode.UP)
       .toInt
 

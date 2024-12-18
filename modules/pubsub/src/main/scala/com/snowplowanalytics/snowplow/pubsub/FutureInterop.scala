@@ -13,7 +13,7 @@ import com.google.api.core.{ApiFuture, ApiFutureCallback, ApiFutures}
 import com.google.common.util.concurrent.MoreExecutors
 
 object FutureInterop {
-  def fromFuture[F[_]: Async, A](fut: ApiFuture[A]): F[Unit] =
+  def fromFuture[F[_]: Async, A](fut: ApiFuture[A]): F[A] =
     Async[F]
       .async[A] { cb =>
         val cancel = Async[F].delay {
@@ -24,7 +24,9 @@ object FutureInterop {
           Some(cancel)
         }
       }
-      .void
+
+  def fromFuture_[F[_]: Async, A](fut: ApiFuture[A]): F[Unit] =
+    fromFuture(fut).void
 
   private def addCallback[A](fut: ApiFuture[A], cb: Either[Throwable, A] => Unit): Unit = {
     val apiFutureCallback = new ApiFutureCallback[A] {

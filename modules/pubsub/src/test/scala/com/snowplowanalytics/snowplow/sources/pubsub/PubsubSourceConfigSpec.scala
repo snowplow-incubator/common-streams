@@ -41,15 +41,13 @@ class PubsubSourceConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     val expected = PubsubSourceConfig(
-      subscription                = PubsubSourceConfig.Subscription("my-project", "my-subscription"),
-      parallelPullFactor          = BigDecimal(0.5),
-      bufferMaxBytes              = 10000000,
-      maxAckExtensionPeriod       = 1.hour,
-      minDurationPerAckExtension  = 1.minute,
-      maxDurationPerAckExtension  = 10.minutes,
-      gcpUserAgent                = GcpUserAgent("Snowplow OSS", "example-version"),
-      shutdownTimeout             = 30.seconds,
-      maxPullsPerTransportChannel = 16
+      subscription            = PubsubSourceConfig.Subscription("my-project", "my-subscription"),
+      parallelPullFactor      = BigDecimal(0.5),
+      durationPerAckExtension = 1.minute,
+      minRemainingAckDeadline = BigDecimal(0.1),
+      gcpUserAgent            = GcpUserAgent("Snowplow OSS", "example-version"),
+      maxMessagesPerPull      = 1000,
+      debounceRequests        = 100.millis
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>
