@@ -8,14 +8,13 @@
 package com.snowplowanalytics.snowplow.sinks.kinesis
 
 import cats.implicits._
-import cats.{Applicative, Parallel}
+import cats.Parallel
 import cats.effect.{Async, Resource, Sync}
 import cats.effect.kernel.Ref
 
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.syntax.all._
-import retry.{RetryPolicies, RetryPolicy}
 
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.services.kinesis.KinesisClient
@@ -23,6 +22,8 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.services.kinesis.model.{PutRecordsRequest, PutRecordsRequestEntry, PutRecordsResponse}
+
+import com.snowplowanalytics.snowplow.kinesis.{BackoffPolicy, Retries}
 
 import java.net.URI
 import java.util.UUID
@@ -202,7 +203,7 @@ object KinesisSink {
     streamName: String,
     records: ListOfList[Sinkable]
   ): F[Unit] = {
-    val policyForThrottling = Retries.fibonacci[F](throttlingErrorsPolicy)
+    val policyForThrottling = Retries.forThrottling[F](throttlingErrorsPolicy)
 
     // First, tryWriteToKinesis - the AWS SDK will handle retries. If there are still failures after that, it will:
     // - return messages for retries if we only hit throttliing
@@ -232,17 +233,6 @@ object KinesisSink {
   }
 
   private final case class RequestLimits(recordLimit: Int, bytesLimit: Int)
-
-  private object Retries {
-
-    def fibonacci[F[_]: Applicative](config: BackoffPolicy): RetryPolicy[F] =
-      capBackoffAndRetries(config, RetryPolicies.fibonacciBackoff[F](config.minBackoff))
-
-    private def capBackoffAndRetries[F[_]: Applicative](config: BackoffPolicy, policy: RetryPolicy[F]): RetryPolicy[F] = {
-      val capped = RetryPolicies.capDelay[F](config.maxBackoff, policy)
-      config.maxRetries.fold(capped)(max => capped.join(RetryPolicies.limitRetries(max)))
-    }
-  }
 
   private def getRecordSize(record: PutRecordsRequestEntry) =
     record.data.asByteArrayUnsafe().length + record.partitionKey().getBytes(UTF_8).length

@@ -10,15 +10,21 @@ package com.snowplowanalytics.snowplow.sources.kinesis
 import cats.effect.{Async, Sync}
 import cats.implicits._
 import cats.effect.implicits._
-import com.snowplowanalytics.snowplow.sources.internal.Checkpointer
 import org.typelevel.log4cats.Logger
-import software.amazon.kinesis.exceptions.ShutdownException
+import retry.syntax.all._
+import software.amazon.kinesis.exceptions.{ShutdownException, ThrottlingException}
 import software.amazon.kinesis.processor.RecordProcessorCheckpointer
 import software.amazon.kinesis.retrieval.kpl.ExtendedSequenceNumber
 
+import com.snowplowanalytics.snowplow.sources.internal.Checkpointer
+import com.snowplowanalytics.snowplow.kinesis.{BackoffPolicy, Retries}
+
 import java.util.concurrent.CountDownLatch
 
-private class KinesisCheckpointer[F[_]: Async: Logger] extends Checkpointer[F, Map[String, Checkpointable]] {
+private class KinesisCheckpointer[F[_]: Async: Logger](throttledBackoffPolicy: BackoffPolicy)
+    extends Checkpointer[F, Map[String, Checkpointable]] {
+
+  private val retryPolicy = Retries.forThrottling[F](throttledBackoffPolicy)
 
   override val empty: Map[String, Checkpointable] = Map.empty
 
@@ -56,6 +62,18 @@ private class KinesisCheckpointer[F[_]: Async: Logger] extends Checkpointer[F, M
           checkpointer.checkpoint(extendedSequenceNumber.sequenceNumber, extendedSequenceNumber.subSequenceNumber)
         )
         .recoverWith(ignoreShutdownExceptions(shardId))
+        .retryingOnSomeErrors(
+          policy = retryPolicy,
+          isWorthRetrying = {
+            case _: ThrottlingException => true.pure[F]
+            case _                      => false.pure[F]
+          },
+          onError = { case (_, retryDetails) =>
+            Logger[F].warn(
+              s"Exceeded DynamoDB provisioned throughput. Checkpointing will be retried. (${retryDetails.retriesSoFar} retries so far)"
+            )
+          }
+        )
 
   private def ignoreShutdownExceptions(shardId: String): PartialFunction[Throwable, F[Unit]] = { case _: ShutdownException =>
     // The ShardRecordProcessor instance has been shutdown. This just means another KCL

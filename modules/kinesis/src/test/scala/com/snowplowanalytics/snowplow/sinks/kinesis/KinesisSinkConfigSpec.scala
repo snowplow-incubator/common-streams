@@ -16,6 +16,8 @@ import org.specs2.Specification
 
 import scala.concurrent.duration.DurationLong
 
+import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
+
 class KinesisSinkConfigSpec extends Specification {
   import KinesisSinkConfigSpec._
 
@@ -38,7 +40,7 @@ class KinesisSinkConfigSpec extends Specification {
 
     val expected = KinesisSinkConfig(
       streamName             = "my-stream",
-      throttledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second, maxRetries = None),
+      throttledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
       recordLimit            = 500,
       byteLimit              = 5242880,
       customEndpoint         = None
