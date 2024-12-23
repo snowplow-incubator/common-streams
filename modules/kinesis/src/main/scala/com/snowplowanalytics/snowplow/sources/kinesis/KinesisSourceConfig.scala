@@ -16,6 +16,8 @@ import java.net.URI
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
 
+import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
+
 /**
  * Config to be supplied from the app's hocon
  *
@@ -46,7 +48,8 @@ case class KinesisSourceConfig(
   dynamodbCustomEndpoint: Option[URI],
   cloudwatchCustomEndpoint: Option[URI],
   leaseDuration: FiniteDuration,
-  maxLeasesToStealAtOneTimeFactor: BigDecimal
+  maxLeasesToStealAtOneTimeFactor: BigDecimal,
+  checkpointThrottledBackoffPolicy: BackoffPolicy
 )
 
 object KinesisSourceConfig {

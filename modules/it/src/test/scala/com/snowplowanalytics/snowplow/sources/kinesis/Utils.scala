@@ -9,7 +9,6 @@ package com.snowplowanalytics.snowplow.it.kinesis
 
 import cats.effect.{IO, Ref}
 
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
 
 import software.amazon.awssdk.core.SdkBytes
@@ -19,13 +18,13 @@ import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, GetShar
 
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
-import com.snowplowanalytics.snowplow.sinks.kinesis.{BackoffPolicy, KinesisSinkConfig}
+import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
+import com.snowplowanalytics.snowplow.sinks.kinesis.KinesisSinkConfig
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.time.Instant
-import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.DurationLong
 
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamRequest
@@ -96,12 +95,13 @@ object Utils {
     Some(endpoint),
     Some(endpoint),
     10.seconds,
-    BigDecimal(1.0)
+    BigDecimal(1.0),
+    BackoffPolicy(100.millis, 1.second)
   )
 
   def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfig(
     streamName,
-    BackoffPolicy(FiniteDuration(1, TimeUnit.SECONDS), FiniteDuration(1, TimeUnit.SECONDS), None),
+    BackoffPolicy(1.second, 1.second),
     1000,
     1000000,
     Some(endpoint)
