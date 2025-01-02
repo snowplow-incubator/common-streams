@@ -33,7 +33,7 @@ object KinesisSource {
             kinesisStream(config, liveness)
 
           def checkpointer: KinesisCheckpointer[F] =
-            new KinesisCheckpointer[F]()
+            new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
 
           def lastLiveness: F[FiniteDuration] =
             liveness.get

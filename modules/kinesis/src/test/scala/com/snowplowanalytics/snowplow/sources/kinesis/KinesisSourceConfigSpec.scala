@@ -15,6 +15,8 @@ import io.circe.generic.semiauto._
 import org.specs2.Specification
 import scala.concurrent.duration.DurationLong
 
+import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
+
 class KinesisSourceConfigSpec extends Specification {
   import KinesisSourceConfigSpec._
 
@@ -40,7 +42,11 @@ class KinesisSourceConfigSpec extends Specification {
         "type": "TrimHorizon"
       },
       "leaseDuration": "20 seconds",
-      "maxLeasesToStealAtOneTimeFactor": 0.42
+      "maxLeasesToStealAtOneTimeFactor": 0.42,
+      "checkpointThrottledBackoffPolicy": {
+        "minBackoff": "100 millis",
+        "maxBackoff": "1second"
+      }
     }
     """
 
@@ -52,7 +58,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
         c.leaseDuration must beEqualTo(20.seconds),
-        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42))
+        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
+        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second))
       ).reduce(_ and _)
     }
   }
@@ -71,7 +78,11 @@ class KinesisSourceConfigSpec extends Specification {
         "type": "TRIM_HORIZON"
       },
       "leaseDuration": "20 seconds",
-      "maxLeasesToStealAtOneTimeFactor": 0.42
+      "maxLeasesToStealAtOneTimeFactor": 0.42,
+      "checkpointThrottledBackoffPolicy": {
+        "minBackoff": "100 millis",
+        "maxBackoff": "1second"
+      }
     }
     """
 
@@ -83,7 +94,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
         c.leaseDuration must beEqualTo(20.seconds),
-        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42))
+        c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
+        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second))
       ).reduce(_ and _)
     }
   }
@@ -102,16 +114,17 @@ class KinesisSourceConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     val expected = KinesisSourceConfig(
-      appName                         = "my-app",
-      streamName                      = "my-stream",
-      workerIdentifier                = System.getenv("HOSTNAME"),
-      initialPosition                 = KinesisSourceConfig.InitialPosition.Latest,
-      retrievalMode                   = KinesisSourceConfig.Retrieval.Polling(1000),
-      customEndpoint                  = None,
-      dynamodbCustomEndpoint          = None,
-      cloudwatchCustomEndpoint        = None,
-      leaseDuration                   = 10.seconds,
-      maxLeasesToStealAtOneTimeFactor = BigDecimal(2.0)
+      appName                          = "my-app",
+      streamName                       = "my-stream",
+      workerIdentifier                 = System.getenv("HOSTNAME"),
+      initialPosition                  = KinesisSourceConfig.InitialPosition.Latest,
+      retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000),
+      customEndpoint                   = None,
+      dynamodbCustomEndpoint           = None,
+      cloudwatchCustomEndpoint         = None,
+      leaseDuration                    = 10.seconds,
+      maxLeasesToStealAtOneTimeFactor  = BigDecimal(2.0),
+      checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>
