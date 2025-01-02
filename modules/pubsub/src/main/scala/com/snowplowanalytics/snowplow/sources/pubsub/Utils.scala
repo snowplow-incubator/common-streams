@@ -34,6 +34,7 @@ private[pubsub] object Utils {
         .setAckDeadlineSeconds(duration.toSeconds.toInt)
         .build
       val io = for {
+        _ <- Logger[F].debug(s"Modifying ack deadline for ${ackIds.length} messages by ${duration.toSeconds} seconds")
         apiFuture <- Sync[F].delay(stub.modifyAckDeadlineCallable.futureCall(request))
         _ <- FutureInterop.fromFuture_(apiFuture)
       } yield ()

@@ -21,7 +21,7 @@ import com.google.api.gax.core.{ExecutorProvider, FixedExecutorProvider}
 import com.google.api.gax.grpc.ChannelPoolSettings
 import com.google.cloud.pubsub.v1.SubscriptionAdminSettings
 import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings
-import com.google.pubsub.v1.{PullRequest, PullResponse}
+import com.google.pubsub.v1.{PullRequest, PullResponse, ReceivedMessage}
 import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
@@ -84,7 +84,6 @@ object PubsubSource {
       .fixedRateStartImmediately(config.debounceRequests, dampen = true)
       .parEvalMapUnordered(parallelPullCount)(_ => pullAndManageState(config, stub, refStates))
       .unNone
-      .repeat
       .prefetchN(parallelPullCount)
       .concurrently(extendDeadlines(config, stub, refStates))
       .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
@@ -107,9 +106,7 @@ object PubsubSource {
       if (response.getReceivedMessagesCount > 0) {
         val records = response.getReceivedMessagesList.asScala.toVector
         val chunk   = Chunk.from(records.map(_.getMessage.getData.asReadOnlyByteBuffer()))
-        val (tstampSeconds, tstampNanos) =
-          records.map(r => (r.getMessage.getPublishTime.getSeconds, r.getMessage.getPublishTime.getNanos)).min
-        val ackIds = records.map(_.getAckId)
+        val ackIds  = records.map(_.getAckId)
         Sync[F].uncancelable { _ =>
           for {
             _ <- Logger[F].trace {
@@ -120,12 +117,18 @@ object PubsubSource {
             token <- Unique[F].unique
             currentDeadline = timeReceived.plusMillis(config.durationPerAckExtension.toMillis)
             _ <- refStates.update(_ + (token -> PubsubBatchState(currentDeadline, ackIds)))
-          } yield Some(LowLevelEvents(chunk, Vector(token), Some(Instant.ofEpochSecond(tstampSeconds, tstampNanos.toLong))))
+          } yield Some(LowLevelEvents(chunk, Vector(token), Some(earliestTimestampOfRecords(records))))
         }
       } else {
         none.pure[F]
       }
     }
+
+  private def earliestTimestampOfRecords(records: Vector[ReceivedMessage]): Instant = {
+    val (tstampSeconds, tstampNanos) =
+      records.map(r => (r.getMessage.getPublishTime.getSeconds, r.getMessage.getPublishTime.getNanos)).min
+    Instant.ofEpochSecond(tstampSeconds, tstampNanos.toLong)
+  }
 
   /**
    * "Nacks" any message that was pulled from pubsub but never consumed by the app.

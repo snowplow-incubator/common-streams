@@ -41,7 +41,7 @@ import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
  *   Name by which to identify Snowplow in the GRPC headers
  * @param maxMessagesPerPull
  *   How many pubsub messages to pull from the server in a single request.
- * @param debouceRequests
+ * @param debounceRequests
  *   Adds an artifical delay between consecutive requests to pubsub for more messages. Under some
  *   circumstances, this was found to slightly alleviate a problem in which pubsub might re-deliver
  *   the same messages multiple times.
