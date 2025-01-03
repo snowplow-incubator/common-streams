@@ -10,6 +10,7 @@ package com.snowplowanalytics.snowplow.sources
 import cats.Show
 import cats.implicits._
 import fs2.Stream
+
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -32,7 +33,7 @@ trait SourceAndAck[F[_]] {
    * @return
    *   A stream which should be compiled and drained
    */
-  def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing]
+  def stream(config: EventProcessingConfig[F], processor: EventProcessor[F]): Stream[F, Nothing]
 
   /**
    * Reports on whether the source of events is healthy
@@ -48,6 +49,22 @@ trait SourceAndAck[F[_]] {
    * healthy. If any event is "stuck" then latency is high and the probe should report unhealthy.
    */
   def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus]
+
+  /**
+   * Latency of the message that is currently being processed by the downstream application
+   *
+   * The returned value is `None` if this `SourceAndAck` is currently awaiting messages from
+   * upstream, e.g. it is doing a remote fetch.
+   *
+   * The returned value is `Some` if this `SourceAndAck` has emitted a message downstream to the
+   * application, and it is waiting for the downstream app to "pull" the next message from this
+   * `SourceAndAck`.
+   *
+   * This value should be used as the initial latency at the start of a statsd metrics reporting
+   * period. This ensures the app reports non-zero latency even when the app is stuck (e.g. cannot
+   * load events to destination).
+   */
+  def currentStreamLatency: F[Option[FiniteDuration]]
 }
 
 object SourceAndAck {

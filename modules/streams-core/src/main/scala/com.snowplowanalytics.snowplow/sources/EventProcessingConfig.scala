@@ -25,8 +25,11 @@ import scala.concurrent.duration.FiniteDuration
  *   Whether to open a new [[EventProcessor]] to handle a timed window of events (e.g. for the
  *   transformer) or whether to feed events to a single [[EventProcessor]] in a continuous endless
  *   stream (e.g. Enrich)
+ *
+ * @param latencyConsumer
+ *   common-streams apps should use the latencyConsumer to set the latency metric.
  */
-case class EventProcessingConfig(windowing: EventProcessingConfig.Windowing)
+case class EventProcessingConfig[F[_]](windowing: EventProcessingConfig.Windowing, latencyConsumer: FiniteDuration => F[Unit])
 
 object EventProcessingConfig {
 

@@ -19,8 +19,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import scala.reflect._
 
 import java.nio.ByteBuffer
-import java.time.Instant
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.DurationLong
 
 // kafka
 import fs2.kafka._
@@ -48,11 +47,8 @@ object KafkaSource {
     new LowLevelSource[F, KafkaCheckpoints[F]] {
       def checkpointer: Checkpointer[F, KafkaCheckpoints[F]] = kafkaCheckpointer
 
-      def stream: Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
+      def stream: Stream[F, Stream[F, Option[LowLevelEvents[KafkaCheckpoints[F]]]]] =
         kafkaStream(config, authHandlerClass)
-
-      def lastLiveness: F[FiniteDuration] =
-        Sync[F].realTime
     }
 
   case class OffsetAndCommit[F[_]](offset: Long, commit: F[Unit])
@@ -75,7 +71,7 @@ object KafkaSource {
   private def kafkaStream[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
     config: KafkaSourceConfig,
     authHandlerClass: ClassTag[T]
-  ): Stream[F, Stream[F, LowLevelEvents[KafkaCheckpoints[F]]]] =
+  ): Stream[F, Stream[F, Option[LowLevelEvents[KafkaCheckpoints[F]]]]] =
     KafkaConsumer
       .stream(consumerSettings[F, T](config, authHandlerClass))
       .evalTap(_.subscribeTo(config.topicName))
@@ -89,7 +85,7 @@ object KafkaSource {
 
   private def joinPartitions[F[_]: Async](
     partitioned: PartitionedStreams[F]
-  ): Stream[F, LowLevelEvents[KafkaCheckpoints[F]]] = {
+  ): Stream[F, Option[LowLevelEvents[KafkaCheckpoints[F]]]] = {
     val streams = partitioned.toSeq.map { case (topicPartition, stream) =>
       stream.chunks
         .flatMap { chunk =>
@@ -103,8 +99,8 @@ object KafkaSource {
                 val ts = ccr.record.timestamp
                 ts.logAppendTime.orElse(ts.createTime).orElse(ts.unknownTime)
               }
-              val earliestTimestamp = if (timestamps.isEmpty) None else Some(Instant.ofEpochMilli(timestamps.min))
-              Stream.emit(LowLevelEvents(events, ack, earliestTimestamp))
+              val earliestTimestamp = if (timestamps.isEmpty) None else Some(timestamps.min.millis)
+              Stream.emit(Some(LowLevelEvents(events, ack, earliestTimestamp)))
             case None =>
               Stream.empty
           }
@@ -117,6 +113,7 @@ object KafkaSource {
       Stream
         .emits(streams)
         .parJoinUnbounded
+        .mergeHaltL(Stream.awakeDelay(10.seconds).map(_ => None).repeat) // keepalives
         .onFinalize {
           Logger[F].info(s"Stopping processing of partitions: $formatted")
         }

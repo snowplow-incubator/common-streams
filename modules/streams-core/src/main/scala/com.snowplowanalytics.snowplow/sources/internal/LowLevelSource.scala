@@ -17,7 +17,7 @@ import fs2.{Pipe, Pull, Stream}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import scala.concurrent.duration.{DurationLong, FiniteDuration}
+import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
 
 /**
@@ -43,16 +43,12 @@ private[sources] trait LowLevelSource[F[_], C] {
    * rebalancing.
    *
    * A new [[EventProcessor]] will be invoked for each inner stream
-   */
-  def stream: Stream[F, Stream[F, LowLevelEvents[C]]]
-
-  /**
-   * The last time this source was known to be alive and healthy
    *
-   * The returned value is FiniteDuration since the unix epoch, i.e. the value returned by
-   * `Sync[F].realTime`
+   * The inner stream should periodically emit `None` as a signal that it is alive and healthy, even
+   * when there are no events on the stream. Failure to emit frequently will result in the
+   * `SourceAndAck` reporting itself as unhealthy.
    */
-  def lastLiveness: F[FiniteDuration]
+  def stream: Stream[F, Stream[F, Option[LowLevelEvents[C]]]]
 }
 
 private[sources] object LowLevelSource {
@@ -65,16 +61,36 @@ private[sources] object LowLevelSource {
    * Map is keyed by Token, corresponding to a batch of `TokenedEvents`. Map values are `C`s which
    * is how to ack/checkpoint the batch.
    */
-  private type State[C] = Map[Unique.Token, C]
+  private type AcksState[C] = Map[Unique.Token, C]
 
-  /**
-   * Mutable state used for measuring the event-processing latency from this source
-   *
-   * For the batch that was last emitted downstream for processing, the `Option[FiniteDuration]`
-   * represents the real time (since epoch) that the batch was emitted. If it is None then there is
-   * no batch currently being processed.
-   */
-  private type LatencyRef[F[_]] = Ref[F, Option[FiniteDuration]]
+  private sealed trait InternalState
+
+  private object InternalState {
+
+    /**
+     * The Source is awaiting the downstream processor to pull another message from us
+     *
+     * @param since
+     *   Timestamp of when the last message was emitted downstream. A point in time represented as
+     *   FiniteDuration since the epoch.
+     * @param streamTstamp
+     *   For the last last batch to be emitted downstream, this is the earliest timestamp according
+     *   to the source, i.e. time the event was written to the source stream. It is None if this
+     *   stream type does not record timestamps, e.g. Kafka under some circumstances.
+     */
+    case class AwaitingDownstream(since: FiniteDuration, streamTstamp: Option[FiniteDuration]) extends InternalState
+
+    /**
+     * The Source is awaiting the upstream remote source to provide more messages
+     *
+     * @param since
+     *   Timestamp of when the last message was received up upstream. A point in time represented as
+     *   FiniteDuration since the epoch.
+     */
+    case class AwaitingUpstream(since: FiniteDuration) extends InternalState
+
+    case object Disconnected extends InternalState
+  }
 
   /**
    * Lifts the internal [[LowLevelSource]] into a [[SourceAndAck]], which is the public API of this
@@ -82,23 +98,22 @@ private[sources] object LowLevelSource {
    */
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
     for {
-      latencyRef <- Ref[F].of(Option.empty[FiniteDuration])
-      isConnectedRef <- Ref[F].of(false)
-    } yield sourceAndAckImpl(source, latencyRef, isConnectedRef)
+      stateRef <- Ref[F].of[InternalState](InternalState.Disconnected)
+    } yield sourceAndAckImpl(source, stateRef)
 
   private def sourceAndAckImpl[F[_]: Async, C](
     source: LowLevelSource[F, C],
-    latencyRef: LatencyRef[F],
-    isConnectedRef: Ref[F, Boolean]
+    stateRef: Ref[F, InternalState]
   ): SourceAndAck[F] = new SourceAndAck[F] {
-    def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing] = {
+    def stream(config: EventProcessingConfig[F], processor: EventProcessor[F]): Stream[F, Nothing] = {
       val str = for {
         s2 <- source.stream
         acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
-        _ <- Stream.bracket(isConnectedRef.set(true))(_ => isConnectedRef.set(false))
+        now <- Stream.eval(Sync[F].realTime)
+        _ <- Stream.bracket(stateRef.set(InternalState.AwaitingUpstream(now)))(_ => stateRef.set(InternalState.Disconnected))
       } yield {
         val tokenedSources = s2
-          .through(monitorLatency(latencyRef))
+          .through(monitorLatency(config, stateRef))
           .through(tokened(acksRef))
           .through(windowed(config.windowing))
 
@@ -116,18 +131,27 @@ private[sources] object LowLevelSource {
     }
 
     def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus] =
-      (isConnectedRef.get, latencyRef.get, source.lastLiveness, Sync[F].realTime).mapN {
-        case (false, _, _, _) =>
+      (stateRef.get, Sync[F].realTime).mapN {
+        case (InternalState.Disconnected, _) =>
           SourceAndAck.Disconnected
-        case (_, Some(lastPullTime), _, now) if now - lastPullTime > maxAllowedProcessingLatency =>
-          SourceAndAck.LaggingEventProcessor(now - lastPullTime)
-        case (_, _, lastLiveness, now) if now - lastLiveness > maxAllowedProcessingLatency =>
-          SourceAndAck.InactiveSource(now - lastLiveness)
+        case (InternalState.AwaitingDownstream(since, _), now) if now - since > maxAllowedProcessingLatency =>
+          SourceAndAck.LaggingEventProcessor(now - since)
+        case (InternalState.AwaitingUpstream(since), now) if now - since > maxAllowedProcessingLatency =>
+          SourceAndAck.InactiveSource(now - since)
         case _ => SourceAndAck.Healthy
+      }
+
+    def currentStreamLatency: F[Option[FiniteDuration]] =
+      stateRef.get.flatMap {
+        case InternalState.AwaitingDownstream(_, Some(tstamp)) =>
+          Sync[F].realTime.map { now =>
+            Some(now - tstamp)
+          }
+        case _ => none.pure[F]
       }
   }
 
-  private def nackUnhandled[F[_]: Monad, C](checkpointer: Checkpointer[F, C], ref: Ref[F, State[C]]): F[Unit] =
+  private def nackUnhandled[F[_]: Monad, C](checkpointer: Checkpointer[F, C], ref: Ref[F, AcksState[C]]): F[Unit] =
     ref.get
       .flatMap { map =>
         checkpointer.nack(checkpointer.combineAll(map.values))
@@ -138,29 +162,41 @@ private[sources] object LowLevelSource {
    *
    * The token can later be exchanged for the original checkpointable item
    */
-  private def tokened[F[_]: Sync, C](ref: Ref[F, State[C]]): Pipe[F, LowLevelEvents[C], TokenedEvents] =
-    _.evalMap { case LowLevelEvents(events, ack, earliestSourceTstamp) =>
+  private def tokened[F[_]: Sync, C](ref: Ref[F, AcksState[C]]): Pipe[F, LowLevelEvents[C], TokenedEvents] =
+    _.evalMap { case LowLevelEvents(events, ack, _) =>
       for {
         token <- Unique[F].unique
         _ <- ref.update(_ + (token -> ack))
-      } yield TokenedEvents(events, token, earliestSourceTstamp)
+      } yield TokenedEvents(events, token)
     }
 
   /**
    * An fs2 Pipe which records what time (duration since epoch) we last emitted a batch downstream
    * for processing
    */
-  private def monitorLatency[F[_]: Sync, A](ref: Ref[F, Option[FiniteDuration]]): Pipe[F, A, A] = {
+  private def monitorLatency[F[_]: Sync, C](
+    config: EventProcessingConfig[F],
+    ref: Ref[F, InternalState]
+  ): Pipe[F, Option[LowLevelEvents[C]], LowLevelEvents[C]] = {
 
-    def go(source: Stream[F, A]): Pull[F, A, Unit] =
+    def go(source: Stream[F, Option[LowLevelEvents[C]]]): Pull[F, LowLevelEvents[C], Unit] =
       source.pull.uncons1.flatMap {
         case None => Pull.done
-        case Some((pulled, source)) =>
+        case Some((Some(pulled), source)) =>
           for {
             now <- Pull.eval(Sync[F].realTime)
-            _ <- Pull.eval(ref.set(Some(now)))
+            latency = pulled.earliestSourceTstamp.fold(Duration.Zero)(now - _)
+            _ <- Pull.eval(config.latencyConsumer(latency))
+            _ <- Pull.eval(ref.set(InternalState.AwaitingDownstream(now, pulled.earliestSourceTstamp)))
             _ <- Pull.output1(pulled)
-            _ <- Pull.eval(ref.set(None))
+            _ <- Pull.eval(ref.set(InternalState.AwaitingUpstream(now)))
+            _ <- go(source)
+          } yield ()
+        case Some((None, source)) =>
+          for {
+            now <- Pull.eval(Sync[F].realTime)
+            _ <- Pull.eval(config.latencyConsumer(Duration.Zero))
+            _ <- Pull.eval(ref.set(InternalState.AwaitingUpstream(now)))
             _ <- go(source)
           } yield ()
       }
@@ -190,11 +226,11 @@ private[sources] object LowLevelSource {
    */
   private def messageSink[F[_]: Async, C](
     processor: EventProcessor[F],
-    ref: Ref[F, State[C]],
+    ref: Ref[F, AcksState[C]],
     checkpointer: Checkpointer[F, C],
     control: EagerWindows.Control[F]
   ): Pipe[F, TokenedEvents, Nothing] =
-    _.evalTap { case TokenedEvents(events, _, _) =>
+    _.evalTap { case TokenedEvents(events, _) =>
       Logger[F].debug(s"Batch of ${events.size} events received from the source stream")
     }
       .through(processor)

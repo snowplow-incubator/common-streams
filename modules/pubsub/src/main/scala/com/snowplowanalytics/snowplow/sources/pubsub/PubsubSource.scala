@@ -14,8 +14,6 @@ import fs2.{Chunk, Stream}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import java.time.Instant
-
 // pubsub
 import com.google.api.gax.core.{ExecutorProvider, FixedExecutorProvider}
 import com.google.api.gax.grpc.ChannelPoolSettings
@@ -31,7 +29,7 @@ import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
 import com.snowplowanalytics.snowplow.sources.pubsub.PubsubRetryOps.implicits._
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._
 
 import java.util.concurrent.{ExecutorService, Executors}
@@ -64,17 +62,14 @@ object PubsubSource {
     new LowLevelSource[F, Vector[Unique.Token]] {
       def checkpointer: Checkpointer[F, Vector[Unique.Token]] = new PubsubCheckpointer(config.subscription, deferredResources)
 
-      def stream: Stream[F, Stream[F, LowLevelEvents[Vector[Unique.Token]]]] =
+      def stream: Stream[F, Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
         pubsubStream(config, deferredResources)
-
-      def lastLiveness: F[FiniteDuration] =
-        Sync[F].realTime
     }
 
   private def pubsubStream[F[_]: Async](
     config: PubsubSourceConfig,
     deferredResources: Deferred[F, PubsubCheckpointer.Resources[F]]
-  ): Stream[F, Stream[F, LowLevelEvents[Vector[Unique.Token]]]] =
+  ): Stream[F, Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
     for {
       parallelPullCount <- Stream.eval(Sync[F].delay(chooseNumParallelPulls(config)))
       stub <- Stream.resource(stubResource(config))
@@ -83,7 +78,6 @@ object PubsubSource {
     } yield Stream
       .fixedRateStartImmediately(config.debounceRequests, dampen = true)
       .parEvalMapUnordered(parallelPullCount)(_ => pullAndManageState(config, stub, refStates))
-      .unNone
       .prefetchN(parallelPullCount)
       .concurrently(extendDeadlines(config, stub, refStates))
       .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
@@ -124,10 +118,10 @@ object PubsubSource {
       }
     }
 
-  private def earliestTimestampOfRecords(records: Vector[ReceivedMessage]): Instant = {
+  private def earliestTimestampOfRecords(records: Vector[ReceivedMessage]): FiniteDuration = {
     val (tstampSeconds, tstampNanos) =
       records.map(r => (r.getMessage.getPublishTime.getSeconds, r.getMessage.getPublishTime.getNanos)).min
-    Instant.ofEpochSecond(tstampSeconds, tstampNanos.toLong)
+    tstampSeconds.seconds + tstampNanos.toLong.nanos
   }
 
   /**

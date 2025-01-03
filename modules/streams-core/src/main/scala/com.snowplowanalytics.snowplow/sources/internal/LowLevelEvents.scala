@@ -10,16 +10,19 @@ package com.snowplowanalytics.snowplow.sources.internal
 import fs2.Chunk
 
 import java.nio.ByteBuffer
-import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * The events and checkpointable item emitted by a LowLevelSource
  *
  * This library uses LowLevelEvents internally, but it is never exposed to the high level event
  * processor
+ *
+ * @param earliestSourceTstamp
+ *   A point in time, represented as a `FiniteDuration` since epoch
  */
 case class LowLevelEvents[C](
   events: Chunk[ByteBuffer],
   ack: C,
-  earliestSourceTstamp: Option[Instant]
+  earliestSourceTstamp: Option[FiniteDuration]
 )

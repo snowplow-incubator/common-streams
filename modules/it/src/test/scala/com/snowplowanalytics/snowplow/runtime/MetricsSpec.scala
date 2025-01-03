@@ -76,7 +76,7 @@ object TestMetrics {
     ref: Ref[IO, TestState],
     emptyState: TestState,
     config: Option[Metrics.StatsdConfig]
-  ) extends Metrics[IO, TestState](ref, emptyState, config) {
+  ) extends Metrics[IO, TestState](ref, IO.pure(emptyState), config) {
     def count(c: Int)           = ref.update(s => s.copy(counter = s.counter + c))
     def time(t: FiniteDuration) = ref.update(s => s.copy(timer = s.timer + t))
   }
