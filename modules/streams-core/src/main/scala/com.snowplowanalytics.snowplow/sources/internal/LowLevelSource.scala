@@ -18,6 +18,7 @@ import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
+import java.time.Instant
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
 
 /**
@@ -68,13 +69,28 @@ private[sources] object LowLevelSource {
   private type State[C] = Map[Unique.Token, C]
 
   /**
+   * Timestamps of the instantaneous state of the Source
+   *
+   * @param wallTime
+   *   The real time (since epoch) that this Source emitted a batch to the downstream app for
+   *   processing.
+   * @param streamTime
+   *   For the last batch to be emitted downstream, this is the earliest timestamp according to the
+   *   source, i.e. time the event was written to the source stream. It is None if this stream type
+   *   does not record timestamps, e.g. Kafka under some circumstances.
+   *
+   * Note that both values represent instants of time. They have different types (FiniteDuration and
+   * Instant) but that is just for convenience to match the incoming data.
+   */
+  private case class LastEmittedTstamps(wallTime: FiniteDuration, streamTime: Option[Instant])
+
+  /**
    * Mutable state used for measuring the event-processing latency from this source
    *
-   * For the batch that was last emitted downstream for processing, the `Option[FiniteDuration]`
-   * represents the real time (since epoch) that the batch was emitted. If it is None then there is
-   * no batch currently being processed.
+   * Holds a `LastEmittedTstamps` for the batch that was last emitted downstream for processing. It
+   * is None if there is no batch currently being processed downstream.
    */
-  private type LatencyRef[F[_]] = Ref[F, Option[FiniteDuration]]
+  private type LatencyRef[F[_]] = Ref[F, Option[LastEmittedTstamps]]
 
   /**
    * Lifts the internal [[LowLevelSource]] into a [[SourceAndAck]], which is the public API of this
@@ -82,7 +98,7 @@ private[sources] object LowLevelSource {
    */
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
     for {
-      latencyRef <- Ref[F].of(Option.empty[FiniteDuration])
+      latencyRef <- Ref[F].of(Option.empty[LastEmittedTstamps])
       isConnectedRef <- Ref[F].of(false)
     } yield sourceAndAckImpl(source, latencyRef, isConnectedRef)
 
@@ -119,11 +135,20 @@ private[sources] object LowLevelSource {
       (isConnectedRef.get, latencyRef.get, source.lastLiveness, Sync[F].realTime).mapN {
         case (false, _, _, _) =>
           SourceAndAck.Disconnected
-        case (_, Some(lastPullTime), _, now) if now - lastPullTime > maxAllowedProcessingLatency =>
+        case (_, Some(LastEmittedTstamps(lastPullTime, _)), _, now) if now - lastPullTime > maxAllowedProcessingLatency =>
           SourceAndAck.LaggingEventProcessor(now - lastPullTime)
         case (_, _, lastLiveness, now) if now - lastLiveness > maxAllowedProcessingLatency =>
           SourceAndAck.InactiveSource(now - lastLiveness)
         case _ => SourceAndAck.Healthy
+      }
+
+    def currentStreamLatency: F[Option[FiniteDuration]] =
+      latencyRef.get.flatMap {
+        case Some(LastEmittedTstamps(_, Some(tstamp))) =>
+          Sync[F].realTime.map { now =>
+            Some(now - tstamp.toEpochMilli.millis)
+          }
+        case _ => none.pure[F]
       }
   }
 
@@ -150,15 +175,15 @@ private[sources] object LowLevelSource {
    * An fs2 Pipe which records what time (duration since epoch) we last emitted a batch downstream
    * for processing
    */
-  private def monitorLatency[F[_]: Sync, A](ref: Ref[F, Option[FiniteDuration]]): Pipe[F, A, A] = {
+  private def monitorLatency[F[_]: Sync, C](ref: LatencyRef[F]): Pipe[F, LowLevelEvents[C], LowLevelEvents[C]] = {
 
-    def go(source: Stream[F, A]): Pull[F, A, Unit] =
+    def go(source: Stream[F, LowLevelEvents[C]]): Pull[F, LowLevelEvents[C], Unit] =
       source.pull.uncons1.flatMap {
         case None => Pull.done
         case Some((pulled, source)) =>
           for {
             now <- Pull.eval(Sync[F].realTime)
-            _ <- Pull.eval(ref.set(Some(now)))
+            _ <- Pull.eval(ref.set(Some(LastEmittedTstamps(now, pulled.earliestSourceTstamp))))
             _ <- Pull.output1(pulled)
             _ <- Pull.eval(ref.set(None))
             _ <- go(source)

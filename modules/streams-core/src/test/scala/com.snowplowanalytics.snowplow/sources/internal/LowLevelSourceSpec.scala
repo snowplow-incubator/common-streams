@@ -16,9 +16,10 @@ import cats.effect.testing.specs2.CatsEffect
 import fs2.{Chunk, Stream}
 import org.specs2.Specification
 
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
-
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+
 import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
 
 import java.nio.ByteBuffer
@@ -48,6 +49,11 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       report healthy after all events have been processed and acked $health4
       report disconnected while source is in between two active streams of events (e.g. during kafka rebalance) $health5
       report unhealthy if the underlying low level source is lagging $health6
+
+    When reporting currentStreamLatency
+      report no timestamp when there are no events $latency1
+      report a timestamp if there are unprocessed events $latency2
+      report no timestamp after events are processed $latency3
   """
 
   def e1 = {
@@ -639,6 +645,84 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     TestControl.executeEmbed(io)
   }
+
+  /** Specs for health check */
+
+  def latency1 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    // A source that emits nothing
+    val lowLevelSource = new LowLevelSource[IO, Unit] {
+      def checkpointer: Checkpointer[IO, Unit]                 = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
+      def stream: Stream[IO, Stream[IO, LowLevelEvents[Unit]]] = Stream.emit(Stream.never[IO])
+      def lastLiveness: IO[FiniteDuration]                     = IO.realTime
+    }
+
+    val io = for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(lowLevelSource)
+      processor = testProcessor(refActions, TestSourceConfig(1, 1, 1.second, 1.second))
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(1.hour)
+      reportedLatency <- sourceAndAck.currentStreamLatency
+      _ <- fiber.cancel
+    } yield reportedLatency must beNone
+
+    TestControl.executeEmbed(io)
+  }
+
+  def latency2 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing)
+
+    val streamTstamp = Instant.parse("2024-01-02T03:04:05.123Z")
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 0.second,
+      timeToProcessBatch  = 1.hour, // Processor is very slow to sink the events
+      streamTstamp        = streamTstamp
+    )
+
+    val io = for {
+      _ <- IO.sleep(streamTstamp.toEpochMilli.millis + 2.minutes)
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = testProcessor(refActions, testConfig)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(5.minutes)
+      reportedLatency <- sourceAndAck.currentStreamLatency
+      _ <- fiber.cancel
+    } yield reportedLatency must beSome(7.minutes)
+
+    TestControl.executeEmbed(io)
+  }
+
+  def latency3 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(1.hour, 1.0, 2))
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 1.second,
+      timeToProcessBatch  = 1.second
+    )
+
+    val io = for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
+      processor = windowedProcessor(refActions, testConfig)
+      fiber <- sourceAndAck.stream(config, processor).compile.drain.start
+      _ <- IO.sleep(30.minutes)
+      reportedLatency <- sourceAndAck.currentStreamLatency
+      _ <- fiber.cancel
+    } yield reportedLatency must beNone
+
+    TestControl.executeEmbed(io)
+  }
+
 }
 
 object LowLevelSourceSpec {
@@ -657,7 +741,8 @@ object LowLevelSourceSpec {
     eventsPerBatch: Int,
     timeBetweenBatches: FiniteDuration,
     timeToProcessBatch: FiniteDuration,
-    timeToFinalizeWindow: FiniteDuration = 0.seconds
+    timeToFinalizeWindow: FiniteDuration = 0.seconds,
+    streamTstamp: Instant                = Instant.EPOCH
   )
 
   /**
@@ -737,7 +822,7 @@ object LowLevelSourceSpec {
                   .map { numbers =>
                     val events  = numbers.map(_.toString)
                     val asBytes = Chunk.from(events).map(e => ByteBuffer.wrap(e.getBytes(StandardCharsets.UTF_8)))
-                    LowLevelEvents(events = asBytes, ack = events.toList, earliestSourceTstamp = None)
+                    LowLevelEvents(events = asBytes, ack = events.toList, earliestSourceTstamp = Some(config.streamTstamp))
                   }
               }
               .flatMap { e =>

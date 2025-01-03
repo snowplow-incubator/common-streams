@@ -24,13 +24,14 @@ import java.nio.charset.StandardCharsets.UTF_8
 
 abstract class Metrics[F[_]: Async, S <: Metrics.State](
   ref: Ref[F, S],
-  emptyState: S,
+  initState: F[S],
   config: Option[Metrics.StatsdConfig]
 ) {
   def report: Stream[F, Nothing] =
     Stream.resource(Metrics.makeReporters[F](config)).flatMap { reporters =>
       def report = for {
-        state <- ref.getAndSet(emptyState)
+        nextState <- initState
+        state <- ref.getAndSet(nextState)
         kv = state.toKVMetrics
         _ <- reporters.traverse(_.report(kv))
       } yield ()
