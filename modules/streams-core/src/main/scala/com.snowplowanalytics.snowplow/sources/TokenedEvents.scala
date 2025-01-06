@@ -11,7 +11,6 @@ import cats.effect.kernel.Unique
 import fs2.Chunk
 
 import java.nio.ByteBuffer
-import java.time.Instant
 
 /**
  * The events as they are fed into a [[EventProcessor]]
@@ -22,12 +21,8 @@ import java.time.Instant
  *   The [[EventProcessor]] must emit this token after it has fully processed the batch of events.
  *   When the [[EventProcessor]] emits the token, it is an instruction to the [[SourceAndAck]] to
  *   ack/checkpoint the events.
- * @param earliestSourceTstamp
- *   The timestamp that an event was originally written to the source stream. Used for calculating
- *   the latency metric.
  */
 case class TokenedEvents(
   events: Chunk[ByteBuffer],
-  ack: Unique.Token,
-  earliestSourceTstamp: Option[Instant]
+  ack: Unique.Token
 )

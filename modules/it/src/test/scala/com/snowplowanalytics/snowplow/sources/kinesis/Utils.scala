@@ -24,14 +24,13 @@ import com.snowplowanalytics.snowplow.sinks.kinesis.KinesisSinkConfig
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import java.time.Instant
 import scala.concurrent.duration.DurationLong
 
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamRequest
 
 object Utils {
 
-  case class ReceivedEvents(events: List[String], tstamp: Option[Instant])
+  case class ReceivedEvents(events: List[String])
 
   def putDataToKinesis(
     client: KinesisAsyncClient,
@@ -81,7 +80,7 @@ object Utils {
       .build()
 
     val out =
-      ReceivedEvents(client.getRecords(request).get().records().asScala.toList.map(record => new String(record.data.asByteArray())), None)
+      ReceivedEvents(client.getRecords(request).get().records().asScala.toList.map(record => new String(record.data.asByteArray())))
     out
   }
 
@@ -108,10 +107,10 @@ object Utils {
   )
 
   def testProcessor(ref: Ref[IO, List[ReceivedEvents]]): EventProcessor[IO] =
-    _.evalMap { case TokenedEvents(events, token, tstamp) =>
+    _.evalMap { case TokenedEvents(events, token) =>
       val parsed = events.map(byteBuffer => StandardCharsets.UTF_8.decode(byteBuffer).toString)
       for {
-        _ <- ref.update(_ :+ ReceivedEvents(parsed.toList, tstamp))
+        _ <- ref.update(_ :+ ReceivedEvents(parsed.toList))
       } yield token
     }
 

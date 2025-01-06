@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.sources.kinesis
 
-import cats.effect.{Async, Ref, Sync}
+import cats.effect.{Async, Sync}
 import cats.data.NonEmptyList
 import cats.implicits._
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
@@ -19,7 +19,7 @@ import software.amazon.kinesis.lifecycle.events.{ProcessRecordsInput, ShardEnded
 import software.amazon.kinesis.retrieval.kpl.ExtendedSequenceNumber
 
 import java.util.concurrent.{CountDownLatch, SynchronousQueue}
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.DurationLong
 import scala.jdk.CollectionConverters._
 
 object KinesisSource {
@@ -27,18 +27,13 @@ object KinesisSource {
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
   def build[F[_]: Async](config: KinesisSourceConfig): F[SourceAndAck[F]] =
-    Ref.ofEffect(Sync[F].realTime).flatMap { liveness =>
-      LowLevelSource.toSourceAndAck {
-        new LowLevelSource[F, Map[String, Checkpointable]] {
-          def stream: Stream[F, Stream[F, LowLevelEvents[Map[String, Checkpointable]]]] =
-            kinesisStream(config, liveness)
+    LowLevelSource.toSourceAndAck {
+      new LowLevelSource[F, Map[String, Checkpointable]] {
+        def stream: Stream[F, Stream[F, Option[LowLevelEvents[Map[String, Checkpointable]]]]] =
+          kinesisStream(config)
 
-          def checkpointer: KinesisCheckpointer[F] =
-            new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
-
-          def lastLiveness: F[FiniteDuration] =
-            liveness.get
-        }
+        def checkpointer: KinesisCheckpointer[F] =
+          new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
       }
     }
 
@@ -46,26 +41,24 @@ object KinesisSource {
   private val synchronousQueueFairness: Boolean = true
 
   private def kinesisStream[F[_]: Async](
-    config: KinesisSourceConfig,
-    liveness: Ref[F, FiniteDuration]
-  ): Stream[F, Stream[F, LowLevelEvents[Map[String, Checkpointable]]]] = {
+    config: KinesisSourceConfig
+  ): Stream[F, Stream[F, Option[LowLevelEvents[Map[String, Checkpointable]]]]] = {
     val actionQueue = new SynchronousQueue[KCLAction](synchronousQueueFairness)
     for {
       _ <- Stream.resource(KCLScheduler.populateQueue[F](config, actionQueue))
-      events <- Stream.emit(pullFromQueueAndEmit(actionQueue, liveness).stream).repeat
+      events <- Stream.emit(pullFromQueueAndEmit(actionQueue).stream).repeat
     } yield events
   }
 
   private def pullFromQueueAndEmit[F[_]: Sync](
-    queue: SynchronousQueue[KCLAction],
-    liveness: Ref[F, FiniteDuration]
-  ): Pull[F, LowLevelEvents[Map[String, Checkpointable]], Unit] =
-    Pull.eval(pullFromQueue(queue, liveness)).flatMap { case PullFromQueueResult(actions, hasShardEnd) =>
+    queue: SynchronousQueue[KCLAction]
+  ): Pull[F, Option[LowLevelEvents[Map[String, Checkpointable]]], Unit] =
+    Pull.eval(pullFromQueue(queue)).flatMap { case PullFromQueueResult(actions, hasShardEnd) =>
       val toEmit = actions.traverse {
         case KCLAction.ProcessRecords(_, processRecordsInput) if processRecordsInput.records.asScala.isEmpty =>
-          Pull.done
+          Pull.output1(None)
         case KCLAction.ProcessRecords(shardId, processRecordsInput) =>
-          Pull.output1(provideNextChunk(shardId, processRecordsInput)).covary[F]
+          Pull.output1(Some(provideNextChunk(shardId, processRecordsInput))).covary[F]
         case KCLAction.ShardEnd(shardId, await, shardEndedInput) =>
           handleShardEnd[F](shardId, await, shardEndedInput)
         case KCLAction.KCLError(t) =>
@@ -81,14 +74,13 @@ object KinesisSource {
         }
         Pull.eval(log).covaryOutput *> toEmit *> Pull.done
       } else
-        toEmit *> pullFromQueueAndEmit(queue, liveness)
+        toEmit *> pullFromQueueAndEmit(queue)
     }
 
   private case class PullFromQueueResult(actions: NonEmptyList[KCLAction], hasShardEnd: Boolean)
 
-  private def pullFromQueue[F[_]: Sync](queue: SynchronousQueue[KCLAction], liveness: Ref[F, FiniteDuration]): F[PullFromQueueResult] =
+  private def pullFromQueue[F[_]: Sync](queue: SynchronousQueue[KCLAction]): F[PullFromQueueResult] =
     resolveNextAction(queue)
-      .productL(updateLiveness(liveness))
       .flatMap {
         case shardEnd: KCLAction.ShardEnd =>
           // If we reached the end of one shard, it is likely we reached the end of other shards too.
@@ -115,9 +107,6 @@ object KinesisSource {
       _ <- Sync[F].delay(queue.drainTo(ret))
     } yield ret.asScala.toList
 
-  private def updateLiveness[F[_]: Sync](liveness: Ref[F, FiniteDuration]): F[Unit] =
-    Sync[F].realTime.flatMap(now => liveness.set(now))
-
   private def provideNextChunk(shardId: String, input: ProcessRecordsInput) = {
     val chunk       = Chunk.javaList(input.records()).map(_.data())
     val lastRecord  = input.records.asScala.last // last is safe because we handled the empty case above
@@ -126,17 +115,21 @@ object KinesisSource {
       new ExtendedSequenceNumber(lastRecord.sequenceNumber, lastRecord.subSequenceNumber),
       input.checkpointer
     )
-    LowLevelEvents(chunk, Map[String, Checkpointable](shardId -> checkpointable), Some(firstRecord.approximateArrivalTimestamp))
+    LowLevelEvents(
+      chunk,
+      Map[String, Checkpointable](shardId -> checkpointable),
+      Some(firstRecord.approximateArrivalTimestamp.toEpochMilli.millis)
+    )
   }
 
   private def handleShardEnd[F[_]](
     shardId: String,
     await: CountDownLatch,
     shardEndedInput: ShardEndedInput
-  ): Pull[F, LowLevelEvents[Map[String, Checkpointable]], Unit] = {
+  ): Pull[F, Option[LowLevelEvents[Map[String, Checkpointable]]], Unit] = {
     val checkpointable = Checkpointable.ShardEnd(shardEndedInput.checkpointer, await)
     val last           = LowLevelEvents(Chunk.empty, Map[String, Checkpointable](shardId -> checkpointable), None)
-    Pull.output1(last)
+    Pull.output1(Some(last))
   }
 
 }

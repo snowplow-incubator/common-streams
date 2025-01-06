@@ -24,8 +24,6 @@ import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
 import com.snowplowanalytics.snowplow.it.DockerPull
 import com.snowplowanalytics.snowplow.it.kinesis._
 
-import java.time.Instant
-
 import Utils._
 
 import org.specs2.specification.BeforeAll
@@ -60,23 +58,21 @@ class KinesisSourceSpec
 
     for {
       refProcessed <- Ref[IO].of[List[ReceivedEvents]](Nil)
-      t1 <- IO.realTimeInstant
       _ <- putDataToKinesis(kinesisClient, testStream1Name, testPayload)
-      t2 <- IO.realTimeInstant
-      processingConfig = new EventProcessingConfig(NoWindowing)
+      refReportedLatencies <- Ref[IO].of(Vector.empty[FiniteDuration])
+      processingConfig = EventProcessingConfig(NoWindowing, tstamp => refReportedLatencies.update(_ :+ tstamp))
       kinesisConfig    = getKinesisSourceConfig(testStream1Name)
       sourceAndAck <- KinesisSource.build[IO](kinesisConfig)
       stream = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
       fiber <- stream.compile.drain.start
       _ <- IO.sleep(2.minutes)
       processed <- refProcessed.get
+      reportedLatencies <- refReportedLatencies.get
       _ <- fiber.cancel
     } yield List(
       processed must haveSize(1),
       processed.head.events must beEqualTo(List(testPayload)),
-      processed.head.tstamp must beSome { tstamp: Instant =>
-        tstamp.toEpochMilli must beBetween(t1.toEpochMilli, t2.toEpochMilli)
-      }
+      reportedLatencies.max must beBetween(1.second, 2.minutes)
     ).reduce(_ and _)
   }
 }

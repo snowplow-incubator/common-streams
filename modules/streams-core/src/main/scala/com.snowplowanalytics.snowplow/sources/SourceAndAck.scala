@@ -33,7 +33,7 @@ trait SourceAndAck[F[_]] {
    * @return
    *   A stream which should be compiled and drained
    */
-  def stream(config: EventProcessingConfig, processor: EventProcessor[F]): Stream[F, Nothing]
+  def stream(config: EventProcessingConfig[F], processor: EventProcessor[F]): Stream[F, Nothing]
 
   /**
    * Reports on whether the source of events is healthy
