@@ -476,7 +476,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
       processor = windowedProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(91.seconds)
+      _ <- IO.sleep(131.seconds)
       _ <- fiber.cancel
       result <- refActions.get
     } yield result must beEqualTo(
@@ -490,15 +490,21 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.ProcessorReceivedEvents("1970-01-01T00:00:22Z", List("5", "6")),
         Action.ProcessorReceivedEvents("1970-01-01T00:00:33Z", List("7", "8")),
         Action.ProcessorReceivedEvents("1970-01-01T00:00:44Z", List("9", "10")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:52Z"),
+        Action.Checkpointed(List("5", "6", "7", "8", "9", "10")),
+        Action.ProcessorStartedWindow("1970-01-01T00:00:55Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:00:55Z", List("11", "12")),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:06Z", List("13", "14")),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:17Z", List("15", "16")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:22Z"),
-        Action.Checkpointed(List("5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16")),
-        Action.ProcessorStartedWindow("1970-01-01T00:01:28Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:28Z", List("17", "18")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:31Z"),
-        Action.Checkpointed(List("17", "18"))
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:39Z", List("19", "20")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:50Z", List("21", "22")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:55Z"),
+        Action.Checkpointed(List("11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22")),
+        Action.ProcessorStartedWindow("1970-01-01T00:02:01Z"),
+        Action.ProcessorReceivedEvents("1970-01-01T00:02:01Z", List("23", "24")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:02:11Z"),
+        Action.Checkpointed(List("23", "24"))
       )
     )
 
