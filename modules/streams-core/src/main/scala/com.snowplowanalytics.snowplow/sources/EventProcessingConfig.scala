@@ -50,6 +50,11 @@ object EventProcessingConfig {
    *   Controls how many windows are allowed to start eagerly ahead of an earlier window that is
    *   still being finalized. For example, if numEagerWindows=2 then window 42 is allowed to start
    *   while windows 40 and 41 are still finalizing.
+   *
+   * The `firstWindowScaling` lies in the range 0.25 to 0.5. This range comes from experience with
+   * the lake loader: 1. Helps the app quickly reach a stable cpu usage; 2. Avoids a problem in
+   * which the loader pulls in more events in the first window than what it can possibly sink within
+   * the second window.
    */
   case class TimedWindows(
     duration: FiniteDuration,
@@ -61,7 +66,7 @@ object EventProcessingConfig {
     def build[F[_]: Sync](duration: FiniteDuration, numEagerWindows: Int): F[TimedWindows] =
       for {
         random <- Random.scalaUtilRandom
-        factor <- random.nextDouble
+        factor <- random.betweenDouble(0.25, 0.5)
       } yield TimedWindows(duration, factor, numEagerWindows)
   }
 

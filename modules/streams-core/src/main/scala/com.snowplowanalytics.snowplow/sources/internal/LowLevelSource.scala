@@ -283,7 +283,11 @@ private[sources] object LowLevelSource {
    * by flushing all pending events to S3 and then sending the SQS message.
    */
   private def timedWindows[F[_]: Async, A](config: EventProcessingConfig.TimedWindows): Pipe[F, A, Stream[F, A]] = {
-    def go(timedPull: Pull.Timed[F, A], current: Option[Queue[F, Option[A]]]): Pull[F, Stream[F, A], Unit] =
+    def go(
+      timedPull: Pull.Timed[F, A],
+      current: Option[Queue[F, Option[A]]],
+      nextDuration: FiniteDuration
+    ): Pull[F, Stream[F, A], Unit] =
       timedPull.uncons.attempt.flatMap {
         case Right(None) =>
           current match {
@@ -292,8 +296,8 @@ private[sources] object LowLevelSource {
           }
         case Right(Some((Left(_), next))) =>
           current match {
-            case None    => go(next, None)
-            case Some(q) => Pull.eval(q.offer(None)) >> go(next, None)
+            case None    => go(next, None, nextDuration)
+            case Some(q) => Pull.eval(q.offer(None)) >> go(next, None, nextDuration)
           }
         case Right(Some((Right(chunk), next))) =>
           current match {
@@ -302,11 +306,11 @@ private[sources] object LowLevelSource {
                 q <- Pull.eval(Queue.synchronous[F, Option[A]])
                 _ <- Pull.output1(Stream.fromQueueNoneTerminated(q))
                 _ <- Pull.eval(chunk.traverse(a => q.offer(Some(a))))
-                _ <- Pull.eval(Logger[F].info(s"Opening new window with duration ${config.duration}")) >> next.timeout(config.duration)
-              } yield go(next, Some(q))
+                _ <- Pull.eval(Logger[F].info(s"Opening new window with duration $nextDuration")) >> next.timeout(nextDuration)
+              } yield go(next, Some(q), (nextDuration * 2).min(config.duration))
               pull.flatten
             case Some(q) =>
-              Pull.eval(chunk.traverse(a => q.offer(Some(a)))) >> go(next, Some(q))
+              Pull.eval(chunk.traverse(a => q.offer(Some(a)))) >> go(next, Some(q), nextDuration)
           }
         case Left(throwable) =>
           current match {
@@ -324,7 +328,7 @@ private[sources] object LowLevelSource {
             _ <- timedPull.timeout(timeout)
             q <- Pull.eval(Queue.synchronous[F, Option[A]])
             _ <- Pull.output1(Stream.fromQueueNoneTerminated(q))
-          } yield go(timedPull, Some(q))
+          } yield go(timedPull, Some(q), (2 * timeout).min(config.duration))
           pull.flatten
         }
         .stream
@@ -338,6 +342,6 @@ private[sources] object LowLevelSource {
    * time. All instances in the group should end windows at slightly different times, so that
    * downstream gets a more steady flow of completed batches.
    */
-  private def timeoutForFirstWindow(config: EventProcessingConfig.TimedWindows) =
+  private def timeoutForFirstWindow(config: EventProcessingConfig.TimedWindows): FiniteDuration =
     (config.duration.toMillis * config.firstWindowScaling).toLong.milliseconds
 }
