@@ -78,7 +78,6 @@ object PubsubSource {
     } yield Stream
       .fixedRateStartImmediately(config.debounceRequests, dampen = true)
       .parEvalMapUnordered(parallelPullCount)(_ => pullAndManageState(config, stub, refStates))
-      .prefetchN(parallelPullCount)
       .concurrently(extendDeadlines(config, stub, refStates))
       .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
 
