@@ -66,8 +66,8 @@ object EventProcessingConfig {
     def build[F[_]: Sync](duration: FiniteDuration, numEagerWindows: Int): F[TimedWindows] =
       for {
         random <- Random.scalaUtilRandom
-        factor <- random.nextDouble
-      } yield TimedWindows(duration, 0.25 * (1.0 + factor), numEagerWindows)
+        factor <- random.betweenDouble(0.25, 0.5)
+      } yield TimedWindows(duration, factor, numEagerWindows)
   }
 
 }
