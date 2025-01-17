@@ -46,7 +46,8 @@ class KinesisSourceConfigSpec extends Specification {
       "checkpointThrottledBackoffPolicy": {
         "minBackoff": "100 millis",
         "maxBackoff": "1second"
-      }
+      },
+      "debounceCheckpoints": "42 seconds"
     }
     """
 
@@ -59,7 +60,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
         c.leaseDuration must beEqualTo(20.seconds),
         c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
-        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second))
+        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
+        c.debounceCheckpoints must beEqualTo(42.seconds)
       ).reduce(_ and _)
     }
   }
@@ -82,7 +84,8 @@ class KinesisSourceConfigSpec extends Specification {
       "checkpointThrottledBackoffPolicy": {
         "minBackoff": "100 millis",
         "maxBackoff": "1second"
-      }
+      },
+      "debounceCheckpoints": "42 seconds"
     }
     """
 
@@ -95,7 +98,8 @@ class KinesisSourceConfigSpec extends Specification {
         c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
         c.leaseDuration must beEqualTo(20.seconds),
         c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
-        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second))
+        c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
+        c.debounceCheckpoints must beEqualTo(42.seconds)
       ).reduce(_ and _)
     }
   }
@@ -124,7 +128,8 @@ class KinesisSourceConfigSpec extends Specification {
       cloudwatchCustomEndpoint         = None,
       leaseDuration                    = 10.seconds,
       maxLeasesToStealAtOneTimeFactor  = BigDecimal(2.0),
-      checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)
+      checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
+      debounceCheckpoints              = 10.seconds
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

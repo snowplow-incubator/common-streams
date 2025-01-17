@@ -15,6 +15,8 @@ import io.circe.Decoder
 import io.circe.generic.semiauto._
 import org.specs2.Specification
 
+import scala.concurrent.duration.DurationLong
+
 class KafkaSourceConfigSpec extends Specification {
   import KafkaSourceConfigSpec._
 
@@ -50,7 +52,8 @@ class KafkaSourceConfigSpec extends Specification {
         "security.protocol" -> "SASL_SSL",
         "sasl.mechanism" -> "OAUTHBEARER",
         "sasl.jaas.config" -> "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"
-      )
+      ),
+      debounceCommitOffsets = 10.seconds
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

@@ -9,11 +9,22 @@ package com.snowplowanalytics.snowplow.sources.kafka
 
 import io.circe.Decoder
 import io.circe.generic.semiauto._
+import io.circe.config.syntax._
 
+import scala.concurrent.duration.FiniteDuration
+
+/**
+ * Config to be supplied from the app's hocon
+ *
+ * @param debounceCommitOffsets
+ *   How frequently to commit our progress back to kafka. By increasing this value, we decrease the
+ *   number of requests made to the kafka broker.
+ */
 case class KafkaSourceConfig(
   topicName: String,
   bootstrapServers: String,
-  consumerConf: Map[String, String]
+  consumerConf: Map[String, String],
+  debounceCommitOffsets: FiniteDuration
 )
 
 object KafkaSourceConfig {
