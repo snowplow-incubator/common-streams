@@ -64,6 +64,8 @@ object PubsubSource {
 
       def stream: Stream[F, Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
         pubsubStream(config, deferredResources)
+
+      def debounceCheckpoints: FiniteDuration = Duration.Zero
     }
 
   private def pubsubStream[F[_]: Async](

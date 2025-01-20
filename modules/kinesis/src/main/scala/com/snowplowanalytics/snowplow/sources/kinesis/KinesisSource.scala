@@ -19,7 +19,7 @@ import software.amazon.kinesis.lifecycle.events.{ProcessRecordsInput, ShardEnded
 import software.amazon.kinesis.retrieval.kpl.ExtendedSequenceNumber
 
 import java.util.concurrent.{CountDownLatch, SynchronousQueue}
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._
 
 object KinesisSource {
@@ -34,6 +34,8 @@ object KinesisSource {
 
         def checkpointer: KinesisCheckpointer[F] =
           new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
+
+        def debounceCheckpoints: FiniteDuration = config.debounceCheckpoints
       }
     }
 

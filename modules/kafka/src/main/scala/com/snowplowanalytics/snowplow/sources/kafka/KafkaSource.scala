@@ -19,7 +19,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import scala.reflect._
 
 import java.nio.ByteBuffer
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 
 // kafka
 import fs2.kafka._
@@ -49,6 +49,8 @@ object KafkaSource {
 
       def stream: Stream[F, Stream[F, Option[LowLevelEvents[KafkaCheckpoints[F]]]]] =
         kafkaStream(config, authHandlerClass)
+
+      def debounceCheckpoints: FiniteDuration = config.debounceCommitOffsets
     }
 
   case class OffsetAndCommit[F[_]](offset: Long, commit: F[Unit])

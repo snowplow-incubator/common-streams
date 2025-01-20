@@ -35,6 +35,9 @@ import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
  *   up/down and pod-rotation, we want the app to be quick to acquire shard-leases to process. With
  *   bigger instances (more cores/processors) we tend to have more shard-leases per instance, so we
  *   increase how aggressively it acquires leases.
+ * @param debounceCheckpoints
+ *   How frequently to checkpoint our progress to the DynamoDB table. By increasing this value we
+ *   can decrease the write-throughput requirements of the DynamoDB table.
  *
  * Other params are self-explanatory
  */
@@ -49,7 +52,8 @@ case class KinesisSourceConfig(
   cloudwatchCustomEndpoint: Option[URI],
   leaseDuration: FiniteDuration,
   maxLeasesToStealAtOneTimeFactor: BigDecimal,
-  checkpointThrottledBackoffPolicy: BackoffPolicy
+  checkpointThrottledBackoffPolicy: BackoffPolicy,
+  debounceCheckpoints: FiniteDuration
 )
 
 object KinesisSourceConfig {

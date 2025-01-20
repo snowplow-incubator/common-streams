@@ -7,7 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.sources.internal
 
-import cats.Monad
+import cats.{Monad, Semigroup}
 import cats.implicits._
 import cats.effect.std.Queue
 import cats.effect.kernel.{Ref, Unique}
@@ -49,6 +49,14 @@ private[sources] trait LowLevelSource[F[_], C] {
    * `SourceAndAck` reporting itself as unhealthy.
    */
   def stream: Stream[F, Stream[F, Option[LowLevelEvents[C]]]]
+
+  /**
+   * How frequently we should checkpoint progress to this source
+   *
+   * E.g. for the Kinesis we can increase value to reduce how often we need to write to the DynamoDB
+   * table
+   */
+  def debounceCheckpoints: FiniteDuration
 }
 
 private[sources] object LowLevelSource {
@@ -118,7 +126,7 @@ private[sources] object LowLevelSource {
           .through(windowed(config.windowing))
 
         val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
-          CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control))
+          CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control, source.debounceCheckpoints))
         }
 
         tokenedSources
@@ -223,20 +231,21 @@ private[sources] object LowLevelSource {
    * @param control
    *   Controls the processing of eager windows. Prevents the next eager window from checkpointing
    *   any events before the previous window is fully finalized.
+   * @param debounceCheckpoints
+   *   Debounces how often we call the checkpointer.
    */
   private def messageSink[F[_]: Async, C](
     processor: EventProcessor[F],
     ref: Ref[F, AcksState[C]],
     checkpointer: Checkpointer[F, C],
-    control: EagerWindows.Control[F]
+    control: EagerWindows.Control[F],
+    debounceCheckpoints: FiniteDuration
   ): Pipe[F, TokenedEvents, Nothing] =
     _.evalTap { case TokenedEvents(events, _) =>
       Logger[F].debug(s"Batch of ${events.size} events received from the source stream")
     }
       .through(processor)
       .chunks
-      .prefetch // This prefetch means we can ack messages concurrently with processing the next batch
-      .evalTap(_ => control.waitForPreviousWindow)
       .evalMap { chunk =>
         chunk
           .traverse { token =>
@@ -249,10 +258,14 @@ private[sources] object LowLevelSource {
                 case None    => Async[F].raiseError[C](new IllegalStateException("Missing checkpoint for token"))
               }
           }
-          .flatMap { cs =>
-            checkpointer.ack(checkpointer.combineAll(cs.toIterable))
+          .map { cs =>
+            checkpointer.combineAll(cs.toIterable)
           }
       }
+      .prefetch // This prefetch means we can ack messages concurrently with processing the next batch
+      .through(batchUpCheckpoints(debounceCheckpoints, checkpointer))
+      .evalTap(_ => control.waitForPreviousWindow)
+      .evalMap(c => checkpointer.ack(c))
       .drain
       .onFinalizeCase {
         case ExitCase.Succeeded =>
@@ -344,4 +357,38 @@ private[sources] object LowLevelSource {
    */
   private def timeoutForFirstWindow(config: EventProcessingConfig.TimedWindows): FiniteDuration =
     (config.duration.toMillis * config.firstWindowScaling).toLong.milliseconds
+
+  private def batchUpCheckpoints[F[_]: Async, C](timeout: FiniteDuration, semigroup: Semigroup[C]): Pipe[F, C, C] = {
+
+    def go(timedPull: Pull.Timed[F, C], output: Option[C]): Pull[F, C, Unit] =
+      timedPull.uncons.flatMap {
+        case None =>
+          // Upstream finished cleanly. Emit whatever is pending and we're done.
+          Pull.outputOption1(output)
+        case Some((Left(_), next)) =>
+          // Timer timed-out. Emit whatever is pending.
+          Pull.outputOption1(output) >> go(next, None)
+        case Some((Right(chunk), next)) =>
+          // Upstream emitted tokens to us. We might already have pending tokens
+          output match {
+            case Some(c) =>
+              go(next, Some(chunk.foldLeft(c)(semigroup.combine(_, _))))
+            case None =>
+              semigroup.combineAllOption(chunk.iterator) match {
+                case Some(c) =>
+                  next.timeout(timeout) >> go(next, Some(c))
+                case None =>
+                  go(next, None)
+              }
+          }
+      }
+
+    in =>
+      if (timeout > Duration.Zero)
+        in.pull.timed { timedPull =>
+          go(timedPull, None)
+        }.stream
+      else
+        in
+  }
 }
