@@ -10,7 +10,7 @@ package com.snowplowanalytics.snowplow.sources.pubsub
 import cats.effect.{Async, Deferred, Ref, Resource, Sync}
 import cats.effect.kernel.Unique
 import cats.implicits._
-import fs2.{Chunk, Stream}
+import fs2.{Chunk, Pipe, Stream}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
@@ -77,9 +77,19 @@ object PubsubSource {
       _ <- Stream.eval(deferredResources.complete(PubsubCheckpointer.Resources(stub, refStates)))
     } yield Stream
       .fixedRateStartImmediately(config.debounceRequests, dampen = true)
-      .parEvalMapUnordered(parallelPullCount)(_ => pullAndManageState(config, stub, refStates))
+      .through(parEvalMapUnorderedOrPrefetch(parallelPullCount)(_ => pullAndManageState(config, stub, refStates)))
       .concurrently(extendDeadlines(config, stub, refStates))
       .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
+
+  private def parEvalMapUnorderedOrPrefetch[F[_]: Async, A, B](parallelPullCount: Int)(f: A => F[B]): Pipe[F, A, B] =
+    if (parallelPullCount === 1)
+      // If parallelPullCount is 1, we need a prefetch so the behaviour of this source is roughly
+      // consistent with other sources and other values of parallePullCount
+      _.evalMap(f).prefetch
+    else
+      // If parallelPullCount > 1, then we don't need prefetch, because parEvalMapUnordered already
+      // has the effect of pre-fetching
+      _.parEvalMapUnordered(parallelPullCount)(f)
 
   /**
    * Pulls a batch of messages from pubsub and then manages the state of the batch
