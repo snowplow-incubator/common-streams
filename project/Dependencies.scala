@@ -17,7 +17,7 @@ object Dependencies {
     val fs2              = "3.10.0"
     val log4cats         = "2.6.0"
     val http4s           = "0.23.28"
-    val blaze            = "0.23.16"
+    val blaze            = "0.23.17"
     val decline          = "2.4.1"
     val circe            = "0.14.8"
     val circeExtra       = "0.14.4"
@@ -27,14 +27,14 @@ object Dependencies {
     val collectionCompat = "2.11.0"
 
     // Streams
-    val fs2Kafka      = "3.5.1"
-    val pubsub        = "1.134.0"
-    val awsSdk2       = "2.29.0"
-    val kinesisClient = "2.6.0"
+    val fs2Kafka      = "3.6.0"
+    val pubsub        = "1.136.1"
+    val awsSdk2       = "2.30.17"
+    val kinesisClient = "2.6.1"
 
     // java
     val slf4j    = "2.0.12"
-    val azureSdk = "1.11.4"
+    val azureSdk = "1.15.1"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
