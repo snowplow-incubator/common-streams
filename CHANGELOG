@@ -1,3 +1,9 @@
+Version 0.11.0 (2025-02-13)
+--------------------------
+Debounce how often we checkpoint progress (#109)
+Prefetch from pubsub source when parallelPullCount is 1 (#110)
+Bump dependencies (#112)
+
 Version 0.10.0 (2025-01-13)
 --------------------------
 Remove prefetch from pubsub source (#107)
