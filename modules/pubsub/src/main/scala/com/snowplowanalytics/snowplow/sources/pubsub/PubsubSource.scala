@@ -7,6 +7,8 @@
  */
 package com.snowplowanalytics.snowplow.sources.pubsub
 
+import java.nio.ByteBuffer
+
 import cats.effect.{Async, Deferred, Ref, Resource, Sync}
 import cats.effect.kernel.Unique
 import cats.implicits._
@@ -19,7 +21,8 @@ import com.google.api.gax.core.{ExecutorProvider, FixedExecutorProvider}
 import com.google.api.gax.grpc.ChannelPoolSettings
 import com.google.cloud.pubsub.v1.SubscriptionAdminSettings
 import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings
-import com.google.pubsub.v1.{PullRequest, PullResponse, ReceivedMessage}
+import com.google.protobuf.Timestamp
+import com.google.pubsub.v1.{PullRequest, PullResponse}
 import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
@@ -110,30 +113,39 @@ object PubsubSource {
     pullFromSubscription(config, stub).flatMap { response =>
       if (response.getReceivedMessagesCount > 0) {
         val records = response.getReceivedMessagesList.asScala.toVector
-        val chunk   = Chunk.from(records.map(_.getMessage.getData.asReadOnlyByteBuffer()))
-        val ackIds  = records.map(_.getAckId)
+        val (bytes, ackIds, messageIds, earliestPublishTime) = records.foldLeft(
+          (List.empty[ByteBuffer], Vector.empty[String], List.empty[String], Timestamp.newBuilder().setSeconds(Long.MaxValue).build())
+        ) { case ((data, acks, ids, publishTime), record) =>
+          (
+            record.getMessage.getData.asReadOnlyByteBuffer() :: data,
+            record.getAckId +: acks,
+            record.getMessage.getMessageId :: ids,
+            earliestPublishTimeOf(publishTime, record.getMessage.getPublishTime)
+          )
+        }
+        val earliestTimestamp = earliestPublishTime.getSeconds.seconds + earliestPublishTime.getNanos.toLong.nanos
+        val chunk             = Chunk.from(bytes)
         Sync[F].uncancelable { _ =>
           for {
-            _ <- Logger[F].trace {
-                   records.map(_.getMessage.getMessageId).mkString("Pubsub message IDs: ", ",", "")
-                 }
+            _ <- Logger[F].trace(messageIds.mkString("Pubsub message IDs: ", ",", ""))
             timeReceived <- Sync[F].realTimeInstant
             _ <- Utils.modAck[F](config.subscription, stub, ackIds, config.durationPerAckExtension)
             token <- Unique[F].unique
             currentDeadline = timeReceived.plusMillis(config.durationPerAckExtension.toMillis)
             _ <- refStates.update(_ + (token -> PubsubBatchState(currentDeadline, ackIds)))
-          } yield Some(LowLevelEvents(chunk, Vector(token), Some(earliestTimestampOfRecords(records))))
+          } yield Some(LowLevelEvents(chunk, Vector(token), Some(earliestTimestamp)))
         }
       } else {
         none.pure[F]
       }
     }
 
-  private def earliestTimestampOfRecords(records: Vector[ReceivedMessage]): FiniteDuration = {
-    val (tstampSeconds, tstampNanos) =
-      records.map(r => (r.getMessage.getPublishTime.getSeconds, r.getMessage.getPublishTime.getNanos)).min
-    tstampSeconds.seconds + tstampNanos.toLong.nanos
-  }
+  private def earliestPublishTimeOf(time1: Timestamp, time2: Timestamp): Timestamp =
+    if (time1.getSeconds == time2.getSeconds) {
+      if (time1.getNanos < time2.getNanos) time1 else time2
+    } else {
+      if (time1.getSeconds < time2.getSeconds) time1 else time2
+    }
 
   /**
    * "Nacks" any message that was pulled from pubsub but never consumed by the app.
