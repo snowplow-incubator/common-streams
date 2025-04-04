@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.sinks.kinesis
 
+import cats.Id
 import io.circe._
 import io.circe.generic.semiauto._
 
@@ -14,15 +15,23 @@ import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
 
 import java.net.URI
 
-case class KinesisSinkConfig(
-  streamName: String,
+case class KinesisSinkConfigM[M[_]](
+  streamName: M[String],
   throttledBackoffPolicy: BackoffPolicy,
   recordLimit: Int,
   byteLimit: Int,
   customEndpoint: Option[URI]
 )
 
-object KinesisSinkConfig {
+object KinesisSinkConfigM {
   implicit def decoder: Decoder[KinesisSinkConfig] =
     deriveDecoder[KinesisSinkConfig]
+
+  implicit def optionalDecoder: Decoder[Option[KinesisSinkConfig]] =
+    deriveDecoder[KinesisSinkConfigM[Option]].map {
+      case KinesisSinkConfigM(Some(s), a, b, c, d) =>
+        Some(KinesisSinkConfigM[Id](s, a, b, c, d))
+      case _ =>
+        None
+    }
 }
