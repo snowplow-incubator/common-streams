@@ -38,7 +38,7 @@ class KinesisSinkConfigSpec extends Specification {
 
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
-    val expected = KinesisSinkConfig(
+    val expected = KinesisSinkConfigM(
       streamName             = "my-stream",
       throttledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
       recordLimit            = 500,

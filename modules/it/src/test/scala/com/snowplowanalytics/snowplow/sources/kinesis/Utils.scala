@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.it.kinesis
 
+import cats.Id
 import cats.effect.{IO, Ref}
 
 import scala.jdk.CollectionConverters._
@@ -19,7 +20,7 @@ import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, GetShar
 import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
 import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
 import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
-import com.snowplowanalytics.snowplow.sinks.kinesis.KinesisSinkConfig
+import com.snowplowanalytics.snowplow.sinks.kinesis.{KinesisSinkConfig, KinesisSinkConfigM}
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -99,7 +100,7 @@ object Utils {
     10.seconds
   )
 
-  def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfig(
+  def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfigM[Id](
     streamName,
     BackoffPolicy(1.second, 1.second),
     1000,

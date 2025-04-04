@@ -7,13 +7,14 @@
  */
 package com.snowplowanalytics.snowplow.sinks.pubsub
 
+import cats.Id
 import io.circe.Decoder
 import io.circe.generic.semiauto._
 
 import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 
-case class PubsubSinkConfig(
-  topic: PubsubSinkConfig.Topic,
+case class PubsubSinkConfigM[M[_]](
+  topic: M[PubsubSinkConfig.Topic],
   batchSize: Long,
   requestByteThreshold: Long,
   gcpUserAgent: GcpUserAgent
@@ -21,6 +22,10 @@ case class PubsubSinkConfig(
 
 object PubsubSinkConfig {
   case class Topic(projectId: String, topicId: String)
+}
+
+object PubsubSinkConfigM {
+  import PubsubSinkConfig._
 
   private implicit def topicDecoder: Decoder[Topic] =
     Decoder.decodeString
@@ -33,4 +38,12 @@ object PubsubSinkConfig {
       }
 
   implicit def decoder: Decoder[PubsubSinkConfig] = deriveDecoder[PubsubSinkConfig]
+
+  implicit def optionalDecoder: Decoder[Option[PubsubSinkConfig]] =
+    deriveDecoder[PubsubSinkConfigM[Option]].map {
+      case PubsubSinkConfigM(Some(t), a, b, c) =>
+        Some(PubsubSinkConfigM[Id](t, a, b, c))
+      case _ =>
+        None
+    }
 }
