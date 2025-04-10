@@ -47,6 +47,7 @@ class KafkaSourceConfigSpec extends Specification {
       bootstrapServers = "my-bootstrap-server:9092",
       consumerConf = Map(
         "group.id" -> "my-consumer-group",
+        "group.instance.id" -> System.getenv("HOSTNAME"),
         "allow.auto.create.topics" -> "false",
         "auto.offset.reset" -> "latest",
         "security.protocol" -> "SASL_SSL",
