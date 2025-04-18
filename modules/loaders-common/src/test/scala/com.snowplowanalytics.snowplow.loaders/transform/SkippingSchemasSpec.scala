@@ -458,13 +458,15 @@ class SkippingSchemasSpec extends Specification {
     val criterion = schemasToSkip.map(schemas => SchemaCriterion.parse(schemas).get)
     NonAtomicFields
       .resolveTypes(embeddedResolver, input, criterion)
-      .map { output =>
-        val mapped = output.fields.map(entity => (entity.mergedField.name, entity.mergedVersions)).toMap
+      .map {
+        case Right(output) =>
+          val mapped = output.fields.map(entity => (entity.mergedField.name, entity.mergedVersions)).toMap
 
-        val assertNotExist: MatchResult[Any] = output.fields.map(_.mergedField.name) must not(containAnyOf(shouldNotExist))
-        val assertExists: MatchResult[Any]   = mapped must beEqualTo(shouldExist)
-        val assertFailures: MatchResult[Any] = output.igluFailures.size must beEqualTo(failuresCount)
-        assertNotExist and assertExists and assertFailures
+          val assertNotExist: MatchResult[Any] = output.fields.map(_.mergedField.name) must not(containAnyOf(shouldNotExist))
+          val assertExists: MatchResult[Any]   = mapped must beEqualTo(shouldExist)
+          val assertFailures: MatchResult[Any] = output.igluFailures.size must beEqualTo(failuresCount)
+          assertNotExist and assertExists and assertFailures
+        case Left(_) => ko
       }
       .unsafeRunSync()
   }

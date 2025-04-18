@@ -47,11 +47,26 @@ object NonAtomicFields {
     failure: FailureDetails.LoaderIgluError
   )
 
+  sealed trait ResolveTypesException extends Throwable
+  object ResolveTypesException {
+    case class ClashingFieldNames(fieldsWithSameNames: Set[Set[TabledEntity]]) extends ResolveTypesException {
+      override def getMessage: String = {
+        val errorMessageSchemas = fieldsWithSameNames
+          .map { entities =>
+            val schemaListStr = entities.map(e => s"${e.vendor}.${e.schemaName}").mkString(", ")
+            s"[$schemaListStr]"
+          }
+          .mkString(", ")
+        s"schemas $errorMessageSchemas have clashing column names"
+      }
+    }
+  }
+
   def resolveTypes[F[_]: Async: RegistryLookup](
     resolver: Resolver[F],
     entities: Map[TabledEntity, Set[SchemaSubVersion]],
     filterCriteria: List[SchemaCriterion]
-  ): F[Result] =
+  ): F[Either[ResolveTypesException, Result]] =
     entities.toVector
       .map { case (tabledEntity, subVersions) =>
         // First phase of entity filtering, before we fetch schemas from Iglu and create `TypedTabledEntity`.
@@ -80,8 +95,14 @@ object NonAtomicFields {
           .value
       }
       .map { eithers =>
-        val (failures, good) = eithers.separate
-        Result(good.flatten, failures.toList)
+        val (failures, good)    = eithers.separate
+        val fields              = good.flatten
+        val fieldsWithSameNames = findFieldsWithSameNames(fields)
+        if (fieldsWithSameNames.isEmpty) {
+          Right(Result(fields, failures.toList))
+        } else {
+          Left(ResolveTypesException.ClashingFieldNames(fieldsWithSameNames))
+        }
       }
 
   private def filterSubVersions(
@@ -101,4 +122,12 @@ object NonAtomicFields {
 
   private def doesNotMatchCriteria(filterCriteria: List[SchemaCriterion], schemaKey: SchemaKey): Boolean =
     !filterCriteria.exists(_.matches(schemaKey))
+
+  private def findFieldsWithSameNames(fields: Vector[TypedTabledEntity]): Set[Set[TabledEntity]] =
+    fields
+      .groupBy(_.mergedField.name)
+      .values
+      .filter(_.size > 1)
+      .map(_.map(_.tabledEntity).toSet)
+      .toSet
 }

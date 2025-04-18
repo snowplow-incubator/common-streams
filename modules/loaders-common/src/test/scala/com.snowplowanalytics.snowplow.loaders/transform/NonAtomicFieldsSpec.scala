@@ -7,10 +7,12 @@
  */
 package com.snowplowanalytics.snowplow.loaders.transform
 
+import scala.collection.immutable.ListSet
 import cats.effect.IO
 import cats.data.NonEmptyVector
 import org.specs2.Specification
 import cats.effect.testing.specs2.CatsEffect
+import com.snowplowanalytics.iglu.core.SchemaCriterion
 import com.snowplowanalytics.iglu.client.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.JavaNetRegistryLookup._
 import com.snowplowanalytics.iglu.schemaddl.parquet.{Field, Type}
@@ -50,6 +52,14 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
     when handling Iglu failures should
       return a IgluError if schema key does not exist in a valid series of schemas $fail1
       return an InvalidSchema if the series contains a schema that cannot be parsed $fail2
+
+    when resolving schemas with clashing field names should
+      return Left(ClashingFieldNames) $clashingNames1
+      return Left(ClashingFieldNames) if there are more than one pair of fields with clashing names $clashingNames2
+      return Right if one of the schemas with clashing names are skipped $clashingNames3
+
+    ClashingFieldNames exception message should
+      contain all the field pairs that are given $clashingNamesException1
   """
 
   def ue1 = {
@@ -77,10 +87,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -112,10 +124,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -147,10 +161,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -164,9 +180,11 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must beEmpty)
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must beEmpty)
+      }
     }
 
   }
@@ -192,10 +210,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -224,10 +244,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
   }
 
@@ -255,10 +277,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
   }
 
@@ -292,10 +316,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -328,10 +354,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -366,10 +394,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -405,10 +435,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -422,9 +454,11 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must beEmpty)
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must beEmpty)
+      }
     }
 
   }
@@ -454,10 +488,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -472,10 +508,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity2 -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(2)) and
-        (fields.map(_.tabledEntity) must contain(allOf(tabledEntity1, tabledEntity2)))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(2)) and
+          (fields.map(_.tabledEntity) must contain(allOf(tabledEntity1, tabledEntity2)))
+      }
     }
 
   }
@@ -505,10 +543,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -555,10 +595,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -606,10 +648,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       )
     }
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (failures must beEmpty) and
-        (fields must haveSize(1)) and
-        (fields.head must beEqualTo(expected))
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
     }
 
   }
@@ -622,14 +666,16 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 9))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (fields must beEmpty) and
-        (failures must haveSize(1)) and
-        (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
-          (failure.tabledEntity must beEqualTo(tabledEntity)) and
-            (failure.versionsInBatch must beEqualTo(Set((0, 9)))) and
-            (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.IgluError => ok })
-        })
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (fields must beEmpty) and
+          (failures must haveSize(1)) and
+          (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
+            (failure.tabledEntity must beEqualTo(tabledEntity)) and
+              (failure.versionsInBatch must beEqualTo(Set((0, 9)))) and
+              (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.IgluError => ok })
+          })
+      }
     }
 
   }
@@ -642,15 +688,125 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
       tabledEntity -> Set((0, 0))
     )
 
-    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map { case NonAtomicFields.Result(fields, failures) =>
-      (fields must beEmpty) and
-        (failures must haveSize(1)) and
-        (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
-          (failure.tabledEntity must beEqualTo(tabledEntity)) and
-            (failure.versionsInBatch must beEqualTo(Set((0, 0)))) and
-            (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.InvalidSchema => ok })
-        })
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (fields must beEmpty) and
+          (failures must haveSize(1)) and
+          (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
+            (failure.tabledEntity must beEqualTo(tabledEntity)) and
+              (failure.versionsInBatch must beEqualTo(Set((0, 0)))) and
+              (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.InvalidSchema => ok })
+          })
+      }
     }
+
+  }
+
+  def clashingNames1 = {
+
+    val tabledEntity1 = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "a.b.c", 1)
+    val tabledEntity2 = tabledEntity1.copy(schemaName = "a_b.c")
+
+    val input = Map(
+      tabledEntity1 -> Set((0, 0)),
+      tabledEntity2 -> Set((0, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beLeft(
+        NonAtomicFields.ResolveTypesException.ClashingFieldNames(Set(Set(tabledEntity1, tabledEntity2)))
+      )
+    }
+
+  }
+
+  def clashingNames2 = {
+
+    val tabledEntity11 = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "a.b.c", 1)
+    val tabledEntity12 = tabledEntity11.copy(schemaName = "a_b.c")
+    val tabledEntity13 = tabledEntity11.copy(schemaName = "a_b_c")
+
+    val tabledEntity21 = tabledEntity11.copy(schemaName = "d.e.f")
+    val tabledEntity22 = tabledEntity11.copy(schemaName = "d_e_f")
+
+    val input = Map(
+      tabledEntity11 -> Set((0, 0)),
+      tabledEntity12 -> Set((0, 0)),
+      tabledEntity13 -> Set((0, 0)),
+      tabledEntity21 -> Set((0, 0)),
+      tabledEntity22 -> Set((0, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beLeft(
+        NonAtomicFields.ResolveTypesException.ClashingFieldNames(
+          Set(
+            Set(tabledEntity21, tabledEntity22),
+            Set(tabledEntity11, tabledEntity12, tabledEntity13)
+          )
+        )
+      )
+    }
+
+  }
+
+  def clashingNames3 = {
+
+    val tabledEntity1 = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "a.b.c", 1)
+    val tabledEntity2 = tabledEntity1.copy(schemaName = "a_b.c")
+
+    val input = Map(
+      tabledEntity1 -> Set((0, 0)),
+      tabledEntity2 -> Set((0, 0))
+    )
+
+    val skipped = List(
+      SchemaCriterion("myvendor", "a.b.c", "jsonschema", 1)
+    )
+
+    val expected = {
+      val expectedStruct = Type.Struct(
+        NonEmptyVector.of(
+          Field("col_a", Type.String, Required)
+        )
+      )
+
+      val expectedField = Field("unstruct_event_myvendor_a_b_c_1", expectedStruct, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity2,
+        expectedField,
+        Set((0, 0)),
+        Nil
+      )
+    }
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, skipped).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head must beEqualTo(expected))
+      }
+    }
+
+  }
+
+  def clashingNamesException1 = {
+
+    val tabledEntity1 = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "s1", 1)
+    val tabledEntity2 = tabledEntity1.copy(schemaName = "s2")
+    val tabledEntity3 = tabledEntity1.copy(schemaName = "s3")
+
+    NonAtomicFields.ResolveTypesException
+      .ClashingFieldNames(
+        ListSet(
+          ListSet(tabledEntity1, tabledEntity2),
+          ListSet(tabledEntity1, tabledEntity2, tabledEntity3)
+        )
+      )
+      .getMessage must beEqualTo(
+      "schemas [myvendor.s1, myvendor.s2], [myvendor.s1, myvendor.s2, myvendor.s3] have clashing column names"
+    )
 
   }
 
