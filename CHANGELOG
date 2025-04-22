@@ -1,3 +1,8 @@
+Version 0.12.0 (2025-04-22)
+--------------------------
+Add group.instance.id to kafka consumer config (#116)
+Return error from 'resolveTypes' when schemas have clashing column names (#117)
+
 Version 0.11.0 (2025-02-13)
 --------------------------
 Debounce how often we checkpoint progress (#109)
