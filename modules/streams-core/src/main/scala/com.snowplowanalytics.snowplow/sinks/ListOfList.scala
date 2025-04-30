@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.sinks
 
 import fs2.Chunk
+import cats.implicits._
 import cats.{Eval, Foldable, Monad, Monoid}
 import scala.collection.compat._
 
@@ -89,6 +90,33 @@ class ListOfList[+A](private val value: List[List[A]]) extends AnyVal {
    */
   def copyToIndexedSeq: IndexedSeq[A] =
     asIterable.toIndexedSeq
+
+  /**
+   * This function takes a list of records and splits it into several lists, where each list is as
+   * big as possible with respecting the record limit and the size limit.
+   */
+  def group(
+    recordLimit: Int,
+    sizeLimit: Int,
+    getRecordSize: A => Int
+  ): List[List[A]] = {
+    import ListOfList.GroupAcc
+
+    this
+      .foldLeft(List.empty[GroupAcc[A]]) { case (acc, record) =>
+        val recordSize = getRecordSize(record)
+        acc match {
+          case head :: tail =>
+            if (head.count + 1 > recordLimit || head.size + recordSize > sizeLimit)
+              List(GroupAcc(recordSize, 1, List(record))) ++ List(head) ++ tail
+            else
+              List(GroupAcc(head.size + recordSize, head.count + 1, record :: head.records)) ++ tail
+          case Nil =>
+            List(GroupAcc(recordSize, 1, List(record)))
+        }
+      }
+      .map(_.records)
+  }
 }
 
 object ListOfList {
@@ -146,4 +174,10 @@ object ListOfList {
     }
 
   }
+
+  private case class GroupAcc[A](
+    size: Int,
+    count: Int,
+    records: List[A]
+  )
 }

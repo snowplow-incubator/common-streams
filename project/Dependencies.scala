@@ -35,6 +35,7 @@ object Dependencies {
     // java
     val slf4j    = "2.0.12"
     val azureSdk = "1.15.1"
+    val nsq      = "1.5.2"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
@@ -86,9 +87,10 @@ object Dependencies {
   val slf4jIt             = "org.slf4j"          % "slf4j-simple"               % V.slf4j
 
   // java
-  val slf4jSimple   = "org.slf4j" % "slf4j-simple"   % V.slf4j
-  val slf4jApi      = "org.slf4j" % "slf4j-api"      % V.slf4j
-  val azureIdentity = "com.azure" % "azure-identity" % V.azureSdk
+  val slf4jSimple   = "org.slf4j"        % "slf4j-simple"   % V.slf4j
+  val slf4jApi      = "org.slf4j"        % "slf4j-api"      % V.slf4j
+  val azureIdentity = "com.azure"        % "azure-identity" % V.azureSdk
+  val nsq           = "com.sproutsocial" % "nsq-j"          % V.nsq
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"                      % V.badrows
   val tracker      = "com.snowplowanalytics" %% "snowplow-scala-tracker-core"           % V.tracker
@@ -154,6 +156,13 @@ object Dependencies {
     circeConfig,
     circeGeneric,
     collectionCompat,
+    specs2
+  )
+
+  val nsqDependencies = Seq(
+    nsq,
+    circeConfig,
+    circeGeneric,
     specs2
   )
 

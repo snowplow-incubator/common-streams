@@ -66,38 +66,6 @@ object KinesisSink {
     }
   }
 
-  /**
-   * This function takes a list of records and splits it into several lists, where each list is as
-   * big as possible with respecting the record limit and the size limit.
-   */
-  private[kinesis] def group[A](
-    records: ListOfList[A],
-    recordLimit: Int,
-    sizeLimit: Int,
-    getRecordSize: A => Int
-  ): List[List[A]] = {
-    case class Batch(
-      size: Int,
-      count: Int,
-      records: List[A]
-    )
-
-    records
-      .foldLeft(List.empty[Batch]) { case (acc, record) =>
-        val recordSize = getRecordSize(record)
-        acc match {
-          case head :: tail =>
-            if (head.count + 1 > recordLimit || head.size + recordSize > sizeLimit)
-              List(Batch(recordSize, 1, List(record))) ++ List(head) ++ tail
-            else
-              List(Batch(head.size + recordSize, head.count + 1, record :: head.records)) ++ tail
-          case Nil =>
-            List(Batch(recordSize, 1, List(record)))
-        }
-      }
-      .map(_.records)
-  }
-
   private def putRecords(
     kinesis: KinesisClient,
     streamName: String,
@@ -211,7 +179,8 @@ object KinesisSink {
     def runAndCaptureFailures(ref: Ref[F, ListOfList[PutRecordsRequestEntry]]): F[ListOfList[PutRecordsRequestEntry]] =
       for {
         records <- ref.get
-        failures <- group(records, requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
+        failures <- records
+                      .group(requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
                       .parTraverse(g => tryWriteToKinesis(streamName, kinesis, g))
         listOfList = ListOfList.of(failures)
         _ <- ref.set(listOfList)

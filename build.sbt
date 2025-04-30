@@ -15,6 +15,7 @@ lazy val root = project
     kinesis,
     kafka,
     pubsub,
+    nsq,
     runtimeCommon,
     loadersCommon,
     IT
@@ -97,6 +98,20 @@ lazy val pubsub: Project = project
   .settings(libraryDependencies ++= Dependencies.pubsubDependencies)
   .dependsOn(streams)
 
+lazy val nsq: Project = project
+  .in(file("modules/nsq"))
+  .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
+  .settings(BuildSettings.buildSettings)
+  .settings(BuildSettings.publishSettings)
+  .settings(BuildSettings.mimaSettings)
+  .settings(BuildSettings.docsSettings)
+  .settings(
+    previewFixedPort := Some(9998),
+    Preprocess / preprocessVars := Map("VERSION" -> version.value)
+  )
+  .settings(libraryDependencies ++= Dependencies.nsqDependencies)
+  .dependsOn(streams)
+
 lazy val runtimeCommon: Project = project
   .settings(
     name := "runtime-common"
@@ -139,6 +154,7 @@ val StreamsCore   = config("streams-core")
 val Kinesis       = config("kinesis")
 val Kafka         = config("kafka")
 val PubSub        = config("pubsub")
+val Nsq           = config("nsq")
 val RuntimeCommon = config("runtime-common")
 val LoadersCommon = config("loaders-common")
 
@@ -147,6 +163,7 @@ lazy val scaladocSiteProjects: List[(Project, sbt.Configuration)] = List(
   (kinesis, Kinesis),
   (kafka, Kafka),
   (pubsub, PubSub),
+  (nsq, Nsq),
   (runtimeCommon, RuntimeCommon),
   (loadersCommon, LoadersCommon)
 )
