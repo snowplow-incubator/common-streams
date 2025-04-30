@@ -9,7 +9,7 @@ jobs:
   release:
     strategy:
       matrix:
-        module: [ "streams-core", "kinesis", "kafka", "pubsub", "loaders-common", "runtime-common"]
+        module: [ "streams-core", "kinesis", "kafka", "pubsub", "nsq", "loaders-common", "runtime-common"]
 
     runs-on: ubuntu-latest
     steps:
