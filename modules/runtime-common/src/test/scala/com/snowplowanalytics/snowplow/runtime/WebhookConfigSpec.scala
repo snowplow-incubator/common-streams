@@ -14,7 +14,7 @@ import io.circe.DecodingFailure
 import io.circe.Decoder
 import io.circe.literal._
 import io.circe.generic.semiauto._
-import org.http4s.Uri
+import org.http4s.implicits._
 import org.specs2.Specification
 
 import scala.concurrent.duration.DurationLong
@@ -47,7 +47,7 @@ class WebhookConfigSpec extends Specification {
 
     json.as[Webhook.Config] must beRight { (c: Webhook.Config) =>
       List(
-        c.endpoint must beSome(Uri.unsafeFromString("http://example.com/xyz?abc=123")),
+        c.endpoint must beSome(uri"http://example.com/xyz?abc=123"),
         c.tags must beEqualTo(Map("abc" -> "xyz")),
         c.heartbeat must beEqualTo(42.seconds)
       ).reduce(_ and _)
@@ -101,7 +101,7 @@ class WebhookConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     val expected = Webhook.Config(
-      endpoint  = Some(Uri.unsafeFromString("http://example.com/xyz?abc=123")),
+      endpoint  = Some(uri"http://example.com/xyz?abc=123"),
       tags      = Map.empty,
       heartbeat = 5.minutes
     )

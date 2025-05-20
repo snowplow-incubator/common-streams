@@ -41,7 +41,6 @@ object Dependencies {
     val schemaDdl    = "0.26.0"
     val badrows      = "2.3.0"
     val igluClient   = "4.0.0"
-    val tracker      = "2.0.0"
     val analyticsSdk = "3.2.2"
 
     // tests
@@ -92,12 +91,10 @@ object Dependencies {
   val azureIdentity = "com.azure"        % "azure-identity" % V.azureSdk
   val nsq           = "com.sproutsocial" % "nsq-j"          % V.nsq
 
-  val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"                      % V.badrows
-  val tracker      = "com.snowplowanalytics" %% "snowplow-scala-tracker-core"           % V.tracker
-  val trackerEmit  = "com.snowplowanalytics" %% "snowplow-scala-tracker-emitter-http4s" % V.tracker
-  val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                            % V.schemaDdl
-  val igluClient   = "com.snowplowanalytics" %% "iglu-scala-client"                     % V.igluClient
-  val analyticsSdk = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.analyticsSdk
+  val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
+  val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
+  val igluClient   = "com.snowplowanalytics" %% "iglu-scala-client"            % V.igluClient
+  val analyticsSdk = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk" % V.analyticsSdk
 
   // tests
   val specs2            = "org.specs2"            %% "specs2-core"                   % V.specs2           % Test
@@ -179,8 +176,6 @@ object Dependencies {
     igluClient,
     log4cats,
     slf4jApi,
-    tracker,
-    trackerEmit,
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,
