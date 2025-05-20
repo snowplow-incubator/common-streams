@@ -41,8 +41,8 @@ class PubsubSinkConfigSpec extends Specification {
 
     val expected = PubsubSinkConfigM[Id](
       topic                = PubsubSinkConfig.Topic("my-project", "my-topic"),
-      batchSize            = 1000L,
-      requestByteThreshold = 1000000L,
+      batchSize            = 1000,
+      requestByteThreshold = 1000000,
       gcpUserAgent         = GcpUserAgent("Snowplow OSS", "example-version")
     )
 

@@ -13,7 +13,7 @@ import org.typelevel.log4cats.Logger
 
 import com.google.cloud.pubsub.v1.stub.SubscriberStub
 import com.google.pubsub.v1.ModifyAckDeadlineRequest
-import com.snowplowanalytics.snowplow.sources.pubsub.PubsubRetryOps.implicits._
+import com.snowplowanalytics.snowplow.pubsub.PubsubRetryOps.implicits._
 import com.snowplowanalytics.snowplow.pubsub.FutureInterop
 
 import scala.concurrent.duration.FiniteDuration

@@ -20,7 +20,7 @@ import scala.concurrent.duration.Duration
 
 import com.snowplowanalytics.snowplow.sources.internal.Checkpointer
 import com.snowplowanalytics.snowplow.pubsub.FutureInterop
-import com.snowplowanalytics.snowplow.sources.pubsub.PubsubRetryOps.implicits._
+import com.snowplowanalytics.snowplow.pubsub.PubsubRetryOps.implicits._
 
 /**
  * The Pubsub checkpointer

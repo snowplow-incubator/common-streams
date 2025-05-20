@@ -18,16 +18,15 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import com.google.api.gax.core.{ExecutorProvider, FixedExecutorProvider}
 import com.google.api.gax.grpc.ChannelPoolSettings
 import com.google.cloud.pubsub.v1.SubscriptionAdminSettings
-import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings
 import com.google.pubsub.v1.{PullRequest, PullResponse, ReceivedMessage}
-import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub}
+import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub, SubscriberStubSettings}
 import org.threeten.bp.{Duration => ThreetenDuration}
 
 // snowplow
 import com.snowplowanalytics.snowplow.pubsub.{FutureInterop, GcpUserAgent}
 import com.snowplowanalytics.snowplow.sources.SourceAndAck
 import com.snowplowanalytics.snowplow.sources.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
-import com.snowplowanalytics.snowplow.sources.pubsub.PubsubRetryOps.implicits._
+import com.snowplowanalytics.snowplow.pubsub.PubsubRetryOps.implicits._
 
 import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._

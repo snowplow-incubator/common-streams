@@ -10,69 +10,99 @@ package com.snowplowanalytics.snowplow.sinks.pubsub
 import cats.effect.{Async, Sync}
 import cats.effect.kernel.Resource
 import cats.implicits._
-import cats.Foldable
-import com.google.api.core.{ApiFuture, ApiFutures}
-import com.google.api.gax.batching.BatchingSettings
-import com.google.cloud.pubsub.v1.Publisher
+import cats.effect.implicits._
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+
+import com.google.api.gax.core.FixedExecutorProvider
+import com.google.api.gax.grpc.ChannelPoolSettings
+import com.google.cloud.pubsub.v1.stub.{GrpcPublisherStub, PublisherStub, PublisherStubSettings}
+import com.google.cloud.pubsub.v1.TopicAdminSettings
+import com.google.pubsub.v1.{PublishRequest, PubsubMessage}
 import com.google.protobuf.UnsafeSnowplowOps
-import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
+
 import com.snowplowanalytics.snowplow.pubsub.FutureInterop
+import com.snowplowanalytics.snowplow.pubsub.PubsubRetryOps.implicits._
 import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
-import org.threeten.bp.{Duration => ThreetenDuration}
 
 import scala.jdk.CollectionConverters._
-import java.util.UUID
+import java.util.concurrent.{Executors, ScheduledExecutorService}
 
 import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 
 object PubsubSink {
 
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
+
   def resource[F[_]: Async](config: PubsubSinkConfig): Resource[F, Sink[F]] =
-    mkPublisher[F](config).map { p =>
-      Sink(sinkBatch[F](p, _))
+    stubResource[F](config).map { stub =>
+      Sink(sinkBatch[F](config, stub, _))
     }
 
-  private def sinkBatch[F[_]: Async](publisher: Publisher, batch: ListOfList[Sinkable]): F[Unit] =
-    Foldable[ListOfList]
-      .foldM(batch, List.empty[ApiFuture[String]]) { case (futures, Sinkable(bytes, _, attributes)) =>
-        for {
-          uuid <- Async[F].delay(UUID.randomUUID)
-          message = PubsubMessage.newBuilder
-                      .setData(UnsafeSnowplowOps.wrapBytes(bytes))
-                      .setMessageId(uuid.toString)
-                      .putAllAttributes(attributes.asJava)
-                      .build
-          fut <- Async[F].delay(publisher.publish(message))
-        } yield fut :: futures
+  private def sinkBatch[F[_]: Async](
+    config: PubsubSinkConfig,
+    stub: PublisherStub,
+    batch: ListOfList[Sinkable]
+  ): F[Unit] =
+    batch
+      .mapUnordered { case Sinkable(bytes, _, attributes) =>
+        PubsubMessage.newBuilder
+          .setData(UnsafeSnowplowOps.wrapBytes(bytes))
+          .putAllAttributes(attributes.asJava)
+          .build
       }
-      .flatMap { futures =>
-        for {
-          _ <- Async[F].delay(publisher.publishAllOutstanding)
-          combined = ApiFutures.allAsList(futures.asJava)
-          _ <- FutureInterop.fromFuture(combined)
+      .group(config.batchSize, config.requestByteThreshold, _.getSerializedSize())
+      .parTraverse_ { messages =>
+        val request = PublishRequest.newBuilder
+          .setTopic(s"projects/${config.topic.projectId}/topics/${config.topic.topicId}")
+          .addAllMessages(messages.asJava)
+          .build
+        val io = for {
+          apiFuture <- Sync[F].delay(stub.publishCallable.futureCall(request))
+          _ <- FutureInterop.fromFuture_(apiFuture)
         } yield ()
+        io.retryingOnTransientGrpcFailures
       }
 
-  private def mkPublisher[F[_]: Sync](config: PubsubSinkConfig): Resource[F, Publisher] = {
-    val topic = ProjectTopicName.of(config.topic.projectId, config.topic.topicId)
+  private def stubResource[F[_]: Async](
+    config: PubsubSinkConfig
+  ): Resource[F, PublisherStub] =
+    for {
+      executor <- executorResource
+      subStub <- buildPublisherStub(config, executor)
+    } yield subStub
 
-    val batchSettings = BatchingSettings.newBuilder
-      .setElementCountThreshold(config.batchSize)
-      .setRequestByteThreshold(config.requestByteThreshold)
-      .setDelayThreshold(ThreetenDuration.ofNanos(Long.MaxValue))
-
+  private def executorResource[F[_]: Sync]: Resource[F, ScheduledExecutorService] = {
     val make = Sync[F].delay {
-      Publisher
-        .newBuilder(topic)
-        .setBatchingSettings(batchSettings.build)
-        .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
-        .build
+      Executors.newSingleThreadScheduledExecutor
     }
-
-    Resource.make(make) { publisher =>
-      Sync[F].blocking {
-        publisher.shutdown()
-      }
-    }
+    Resource.make(make)(es => Sync[F].blocking(es.shutdown()))
   }
+
+  /**
+   * Builds the "Stub" which is the object from which we can call PubSub SDK methods
+   */
+  private def buildPublisherStub[F[_]: Sync](
+    config: PubsubSinkConfig,
+    executor: ScheduledExecutorService
+  ): Resource[F, GrpcPublisherStub] = {
+    val channelProvider = TopicAdminSettings
+      .defaultGrpcTransportProviderBuilder()
+      .setChannelPoolSettings {
+        ChannelPoolSettings.staticallySized(1)
+      }
+      .build
+
+    val stubSettings = PublisherStubSettings
+      .newBuilder()
+      .setBackgroundExecutorProvider(FixedExecutorProvider.create(executor))
+      .setCredentialsProvider(TopicAdminSettings.defaultCredentialsProviderBuilder().build())
+      .setTransportChannelProvider(channelProvider)
+      .setHeaderProvider(GcpUserAgent.headerProvider(config.gcpUserAgent))
+      .setEndpoint(PublisherStubSettings.getDefaultEndpoint())
+      .build
+
+    Resource.make(Sync[F].delay(GrpcPublisherStub.create(stubSettings)))(stub => Sync[F].blocking(stub.shutdownNow))
+  }
+
 }
