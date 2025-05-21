@@ -9,18 +9,27 @@ package com.snowplowanalytics.snowplow.sinks.nsq
 
 import io.circe._
 import io.circe.generic.semiauto._
+import cats.Id
 
 import com.snowplowanalytics.snowplow.nsq.BackoffPolicy
 
-case class NsqSinkConfig(
-  topic: String,
-  nsqdHost: String,
-  nsqdPort: Int,
+case class NsqSinkConfigM[M[_]](
+  topic: M[String],
+  nsqdHost: M[String],
+  nsqdPort: M[Int],
   byteLimit: Int,
   backoffPolicy: BackoffPolicy
 )
 
-object NsqSinkConfig {
+object NsqSinkConfigM {
   implicit def decoder: Decoder[NsqSinkConfig] =
     deriveDecoder[NsqSinkConfig]
+
+  implicit def optionalDecoder: Decoder[Option[NsqSinkConfig]] =
+    deriveDecoder[NsqSinkConfigM[Option]].map {
+      case NsqSinkConfigM(Some(t), Some(h), Some(p), byteLimit, conf) =>
+        Some(NsqSinkConfigM[Id](t, h, p, byteLimit, conf))
+      case _ =>
+        None
+    }
 }
