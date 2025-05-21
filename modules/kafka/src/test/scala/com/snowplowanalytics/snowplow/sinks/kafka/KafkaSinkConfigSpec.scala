@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.sinks.kafka
 
+import cats.Id
 import cats.implicits._
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
@@ -40,7 +41,7 @@ class KafkaSinkConfigSpec extends Specification {
 
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
-    val expected = KafkaSinkConfig(
+    val expected = KafkaSinkConfigM[Id](
       topicName        = "my-topic",
       bootstrapServers = "my-bootstrap-server:9092",
       producerConf = Map(

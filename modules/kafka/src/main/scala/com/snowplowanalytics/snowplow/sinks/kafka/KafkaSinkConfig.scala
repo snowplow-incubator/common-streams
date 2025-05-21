@@ -7,15 +7,25 @@
  */
 package com.snowplowanalytics.snowplow.sinks.kafka
 
+import cats.Id
 import io.circe.Decoder
 import io.circe.generic.semiauto._
 
-case class KafkaSinkConfig(
-  topicName: String,
-  bootstrapServers: String,
+case class KafkaSinkConfigM[M[_]](
+  topicName: M[String],
+  bootstrapServers: M[String],
   producerConf: Map[String, String]
 )
 
-object KafkaSinkConfig {
+object KafkaSinkConfigM {
   implicit def decoder: Decoder[KafkaSinkConfig] = deriveDecoder[KafkaSinkConfig]
+
+  implicit def optionalDecoder: Decoder[Option[KafkaSinkConfig]] =
+    deriveDecoder[KafkaSinkConfigM[Option]].map {
+      case KafkaSinkConfigM(Some(t), Some(b), conf) =>
+        Some(KafkaSinkConfigM[Id](t, b, conf))
+      case _ =>
+        None
+    }
+
 }

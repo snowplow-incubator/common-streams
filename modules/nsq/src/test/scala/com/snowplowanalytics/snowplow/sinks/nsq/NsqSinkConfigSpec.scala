@@ -9,6 +9,7 @@ package com.snowplowanalytics.snowplow.sinks.nsq
 
 import com.typesafe.config.ConfigFactory
 
+import cats.Id
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
 import io.circe.generic.semiauto._
@@ -41,7 +42,7 @@ class NsqSinkConfigSpec extends Specification {
 
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
-    val expected = NsqSinkConfig(
+    val expected = NsqSinkConfigM[Id](
       topic         = "test-topic",
       nsqdHost      = "127.0.0.1",
       nsqdPort      = 4150,

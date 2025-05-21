@@ -7,6 +7,7 @@
  */
 package com.snowplowanalytics.snowplow.sinks.pubsub
 
+import cats.Id
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
@@ -38,7 +39,7 @@ class PubsubSinkConfigSpec extends Specification {
 
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
-    val expected = PubsubSinkConfig(
+    val expected = PubsubSinkConfigM[Id](
       topic                = PubsubSinkConfig.Topic("my-project", "my-topic"),
       batchSize            = 1000L,
       requestByteThreshold = 1000000L,
