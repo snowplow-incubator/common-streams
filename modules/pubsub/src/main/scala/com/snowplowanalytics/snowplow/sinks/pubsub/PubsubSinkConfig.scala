@@ -15,8 +15,8 @@ import com.snowplowanalytics.snowplow.pubsub.GcpUserAgent
 
 case class PubsubSinkConfigM[M[_]](
   topic: M[PubsubSinkConfig.Topic],
-  batchSize: Long,
-  requestByteThreshold: Long,
+  batchSize: Int,
+  requestByteThreshold: Int,
   gcpUserAgent: GcpUserAgent
 )
 
