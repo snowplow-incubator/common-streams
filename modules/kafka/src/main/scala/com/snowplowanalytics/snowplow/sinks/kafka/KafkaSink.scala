@@ -17,6 +17,8 @@ import com.snowplowanalytics.snowplow.azure.AzureAuthenticationCallbackHandler
 
 import java.util.UUID
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
+import scala.concurrent.ExecutionContext
 import scala.reflect.ClassTag
 import scala.jdk.CollectionConverters._
 
@@ -28,7 +30,8 @@ object KafkaSink {
   ): Resource[F, Sink[F]] =
     for {
       producer <- makeProducer(config, authHandlerClass)
-    } yield impl(config, producer)
+      ec <- createExecutionContext
+    } yield impl(config, producer, ec)
 
   private def makeProducer[F[_]: Async, T <: AzureAuthenticationCallbackHandler](
     config: KafkaSinkConfig,
@@ -46,9 +49,13 @@ object KafkaSink {
     Resource.make(make)(p => Sync[F].blocking(p.close))
   }
 
-  private def impl[F[_]: Sync](config: KafkaSinkConfig, producer: KafkaProducer[String, Array[Byte]]): Sink[F] =
+  private def impl[F[_]: Async](
+    config: KafkaSinkConfig,
+    producer: KafkaProducer[String, Array[Byte]],
+    ec: ExecutionContext
+  ): Sink[F] =
     Sink { batch =>
-      Sync[F].interruptible {
+      val f = Sync[F].delay {
         val futures = batch.asIterable.map { e =>
           val record = toProducerRecord(config, e)
           producer.send(record)
@@ -56,6 +63,7 @@ object KafkaSink {
 
         futures.foreach(_.get)
       }
+      Async[F].evalOn(f, ec)
     }
 
   private def toProducerRecord(config: KafkaSinkConfig, sinkable: Sinkable): ProducerRecord[String, Array[Byte]] = {
@@ -68,5 +76,12 @@ object KafkaSink {
     }
 
     new ProducerRecord(config.topicName, null, sinkable.partitionKey.getOrElse(UUID.randomUUID.toString), sinkable.bytes, headers.asJava)
+  }
+
+  private def createExecutionContext[F[_]: Sync]: Resource[F, ExecutionContext] = {
+    val make = Sync[F].delay {
+      Executors.newSingleThreadExecutor
+    }
+    Resource.make(make)(e => Sync[F].blocking(e.shutdown)).map(ExecutionContext.fromExecutorService(_))
   }
 }

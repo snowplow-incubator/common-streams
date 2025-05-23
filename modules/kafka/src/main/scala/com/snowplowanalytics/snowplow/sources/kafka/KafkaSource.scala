@@ -88,7 +88,7 @@ object KafkaSource {
   private def joinPartitions[F[_]: Async](
     partitioned: PartitionedStreams[F]
   ): Stream[F, Option[LowLevelEvents[KafkaCheckpoints[F]]]] = {
-    val streams = partitioned.toSeq.map { case (topicPartition, stream) =>
+    val streams = partitioned.toList.map { case (topicPartition, stream) =>
       stream.chunks
         .flatMap { chunk =>
           chunk.last match {
@@ -112,9 +112,7 @@ object KafkaSource {
     val formatted = formatForLog(partitioned.keys)
 
     Stream.eval(Logger[F].info(s"Processsing partitions: $formatted")).drain ++
-      Stream
-        .emits(streams)
-        .parJoinUnbounded
+      streams.parJoinUnbounded
         .mergeHaltL(Stream.awakeDelay(10.seconds).map(_ => None).repeat) // keepalives
         .onFinalize {
           Logger[F].info(s"Stopping processing of partitions: $formatted")
