@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.it.kinesis
+package com.snowplowanalytics.snowplow.it
 
 import cats.Id
 import cats.effect.{IO, Ref}
@@ -17,10 +17,8 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, GetShardIteratorRequest, PutRecordRequest, PutRecordResponse}
 
-import com.snowplowanalytics.snowplow.sources.{EventProcessor, TokenedEvents}
-import com.snowplowanalytics.snowplow.sources.kinesis.KinesisSourceConfig
-import com.snowplowanalytics.snowplow.kinesis.BackoffPolicy
-import com.snowplowanalytics.snowplow.sinks.kinesis.{KinesisSinkConfig, KinesisSinkConfigM}
+import com.snowplowanalytics.snowplow.streams.{EventProcessor, TokenedEvents}
+import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, KinesisSinkConfigM, KinesisSourceConfig}
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
