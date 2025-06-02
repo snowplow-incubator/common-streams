@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.it.kinesis
+package com.snowplowanalytics.snowplow.it
 
 import cats.effect.{IO, Resource}
 import org.slf4j.LoggerFactory

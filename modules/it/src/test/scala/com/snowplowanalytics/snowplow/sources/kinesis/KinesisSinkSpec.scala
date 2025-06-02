@@ -5,7 +5,7 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.sinks.kinesis
+package com.snowplowanalytics.snowplow.it
 
 import cats.effect.{IO, Resource}
 import cats.effect.testing.specs2.CatsResource
@@ -19,9 +19,8 @@ import org.testcontainers.containers.localstack.LocalStackContainer
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.regions.Region
 
-import com.snowplowanalytics.snowplow.it.DockerPull
-import com.snowplowanalytics.snowplow.it.kinesis._
-import com.snowplowanalytics.snowplow.sinks.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.kinesis.KinesisFactory
 
 import Utils._
 import org.specs2.specification.BeforeAll
@@ -40,7 +39,8 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSinkSpec.getClass.getSimpleName)
-      testSink <- KinesisSink.resource[IO](getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
+      testFactory <- KinesisFactory.resource[IO]
+      testSink <- testFactory.sink(getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
     } yield (region, localstack, testSink)
 
   override def is = s2"""

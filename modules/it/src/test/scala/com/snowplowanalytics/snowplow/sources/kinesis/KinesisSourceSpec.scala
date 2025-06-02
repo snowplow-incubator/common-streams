@@ -5,10 +5,11 @@
  * and you may not use this file except in compliance with the Snowplow Community License Version 1.0.
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
-package com.snowplowanalytics.snowplow.sources.kinesis
+package com.snowplowanalytics.snowplow.it
 
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.testing.specs2.CatsResource
+import fs2.Stream
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
@@ -19,17 +20,16 @@ import org.testcontainers.containers.localstack.LocalStackContainer
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
-import com.snowplowanalytics.snowplow.sources.EventProcessingConfig
-import com.snowplowanalytics.snowplow.sources.EventProcessingConfig.NoWindowing
-import com.snowplowanalytics.snowplow.it.DockerPull
-import com.snowplowanalytics.snowplow.it.kinesis._
+import com.snowplowanalytics.snowplow.streams.EventProcessingConfig
+import com.snowplowanalytics.snowplow.streams.EventProcessingConfig.NoWindowing
+import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisSourceConfig}
 
 import Utils._
 
 import org.specs2.specification.BeforeAll
 
 class KinesisSourceSpec
-    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)]
+    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig, KinesisFactory[IO])]
     with SpecificationLike
     with BeforeAll {
   import KinesisSourceSpec._
@@ -41,19 +41,20 @@ class KinesisSourceSpec
   }
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig)] =
+  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig, KinesisFactory[IO])] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
-    } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_))
+      kinesisFactory <- KinesisFactory.resource[IO]
+    } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_), kinesisFactory)
 
   override def is = s2"""
   KinesisSourceSpec should
     read from input stream $e1
   """
 
-  def e1 = withResource { case (_, kinesisClient, getKinesisSourceConfig) =>
+  def e1 = withResource { case (_, kinesisClient, getKinesisSourceConfig, kinesisFactory) =>
     val testPayload = "test-payload"
 
     for {
@@ -62,8 +63,7 @@ class KinesisSourceSpec
       refReportedLatencies <- Ref[IO].of(Vector.empty[FiniteDuration])
       processingConfig = EventProcessingConfig(NoWindowing, tstamp => refReportedLatencies.update(_ :+ tstamp))
       kinesisConfig    = getKinesisSourceConfig(testStream1Name)
-      sourceAndAck <- KinesisSource.build[IO](kinesisConfig)
-      stream = sourceAndAck.stream(processingConfig, testProcessor(refProcessed))
+      stream = Stream.resource(kinesisFactory.source(kinesisConfig)).flatMap(_.stream(processingConfig, testProcessor(refProcessed)))
       fiber <- stream.compile.drain.start
       _ <- IO.sleep(2.minutes)
       processed <- refProcessed.get
