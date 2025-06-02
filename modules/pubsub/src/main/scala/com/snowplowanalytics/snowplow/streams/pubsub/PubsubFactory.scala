@@ -46,8 +46,8 @@ object PubsubFactory {
     def withCredentials(credentials: Credentials) = Sync[F].delay {
       SubscriptionAdminSettings
         .defaultGrpcTransportProviderBuilder()
-        .setMaxInboundMessageSize(20 << 20)
-        .setMaxInboundMetadataSize(20 << 20)
+        .setMaxInboundMessageSize(20 << 20) // 20 MB
+        .setMaxInboundMetadataSize(20 << 20) // 20 MB
         .setKeepAliveTime(ThreetenDuration.ofMinutes(5))
         .setChannelPoolSettings {
           ChannelPoolSettings.staticallySized(1)
