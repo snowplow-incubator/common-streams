@@ -15,7 +15,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 // pubsub
-import com.google.api.gax.core.FixedExecutorProvider
+import com.google.api.gax.core.{CredentialsProvider, FixedExecutorProvider}
 import com.google.api.gax.rpc.FixedTransportChannelProvider
 import com.google.pubsub.v1.{PullRequest, PullResponse, ReceivedMessage}
 import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub, SubscriberStubSettings}
@@ -48,11 +48,12 @@ private[pubsub] object PubsubSource {
   def resource[F[_]: Async](
     config: PubsubSourceConfig,
     transport: FixedTransportChannelProvider,
-    executor: FixedExecutorProvider
+    executor: FixedExecutorProvider,
+    credentials: CredentialsProvider
   ): Resource[F, SourceAndAck[F]] =
     for {
       ref <- Resource.eval(Ref[F].of(Map.empty[Unique.Token, PubsubBatchState]))
-      stub <- buildSubscriberStub(transport, executor)
+      stub <- buildSubscriberStub(transport, executor, credentials)
       source <- Resource.eval(LowLevelSource.toSourceAndAck(lowLevel(config, stub, ref)))
     } yield source
 
@@ -226,12 +227,14 @@ private[pubsub] object PubsubSource {
    */
   private def buildSubscriberStub[F[_]: Sync](
     transport: FixedTransportChannelProvider,
-    executor: FixedExecutorProvider
+    executor: FixedExecutorProvider,
+    credentials: CredentialsProvider
   ): Resource[F, GrpcSubscriberStub] = {
     val stubSettings = SubscriberStubSettings
       .newBuilder()
       .setBackgroundExecutorProvider(executor)
       .setTransportChannelProvider(transport)
+      .setCredentialsProvider(credentials)
       .build
 
     Resource.make(Sync[F].delay(GrpcSubscriberStub.create(stubSettings)))(stub => Sync[F].blocking(stub.shutdownNow))
