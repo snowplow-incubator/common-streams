@@ -14,7 +14,7 @@ import cats.effect.implicits._
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import com.google.api.gax.core.FixedExecutorProvider
+import com.google.api.gax.core.{CredentialsProvider, FixedExecutorProvider}
 import com.google.api.gax.rpc.FixedTransportChannelProvider
 import com.google.cloud.pubsub.v1.stub.{GrpcPublisherStub, PublisherStub, PublisherStubSettings}
 import com.google.pubsub.v1.{PublishRequest, PubsubMessage}
@@ -33,9 +33,10 @@ private[pubsub] object PubsubSink {
   def resource[F[_]: Async](
     config: PubsubSinkConfig,
     transport: FixedTransportChannelProvider,
-    executor: FixedExecutorProvider
+    executor: FixedExecutorProvider,
+    credentials: CredentialsProvider
   ): Resource[F, Sink[F]] =
-    buildPublisherStub[F](transport, executor).map { stub =>
+    buildPublisherStub[F](transport, executor, credentials).map { stub =>
       Sink(sinkBatch[F](config, stub, _))
     }
 
@@ -69,12 +70,14 @@ private[pubsub] object PubsubSink {
    */
   private def buildPublisherStub[F[_]: Sync](
     transport: FixedTransportChannelProvider,
-    executor: FixedExecutorProvider
+    executor: FixedExecutorProvider,
+    credentials: CredentialsProvider
   ): Resource[F, GrpcPublisherStub] = {
     val stubSettings = PublisherStubSettings
       .newBuilder()
       .setBackgroundExecutorProvider(executor)
       .setTransportChannelProvider(transport)
+      .setCredentialsProvider(credentials)
       .build
 
     Resource.make(Sync[F].delay(GrpcPublisherStub.create(stubSettings)))(stub => Sync[F].blocking(stub.shutdownNow))

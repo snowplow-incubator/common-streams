@@ -36,7 +36,8 @@ class PubsubFactoryConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     val expected = PubsubFactoryConfig(
-      gcpUserAgent = GcpUserAgent("Snowplow OSS", "example-version")
+      gcpUserAgent = GcpUserAgent("Snowplow OSS", "example-version"),
+      emulatorHost = None
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>
