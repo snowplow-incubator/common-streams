@@ -17,7 +17,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import com.google.api.gax.core.{CredentialsProvider, FixedExecutorProvider}
 import com.google.api.gax.rpc.FixedTransportChannelProvider
 import com.google.cloud.pubsub.v1.stub.{GrpcPublisherStub, PublisherStub, PublisherStubSettings}
-import com.google.pubsub.v1.{PublishRequest, PubsubMessage}
+import com.google.pubsub.v1.{GetTopicRequest, PublishRequest, PubsubMessage}
 import com.google.protobuf.UnsafeSnowplowOps
 
 import com.snowplowanalytics.snowplow.streams.pubsub.{FutureInterop, PubsubSinkConfig}
@@ -37,8 +37,26 @@ private[pubsub] object PubsubSink {
     credentials: CredentialsProvider
   ): Resource[F, Sink[F]] =
     buildPublisherStub[F](transport, executor, credentials).map { stub =>
-      Sink(sinkBatch[F](config, stub, _))
+      new Sink[F] {
+        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+          sinkBatch[F](config, stub, batch)
+
+        def pingForHealth: F[Boolean] =
+          topicExists(config, stub)
+      }
     }
+
+  private def topicExists[F[_]: Async](config: PubsubSinkConfig, stub: PublisherStub): F[Boolean] = {
+    val request = GetTopicRequest.newBuilder
+      .setTopic(s"projects/${config.topic.projectId}/topics/${config.topic.topicId}")
+      .build
+    for {
+      _ <- Logger[F].info(s"Checking topic ${config.topic.topicId} exists")
+      apiFuture <- Sync[F].delay(stub.getTopicCallable.futureCall(request))
+      _ <- FutureInterop.fromFuture_(apiFuture)
+      _ <- Logger[F].info(s"Confirmed topic ${config.topic.topicId} exists")
+    } yield true
+  }
 
   private def sinkBatch[F[_]: Async](
     config: PubsubSinkConfig,

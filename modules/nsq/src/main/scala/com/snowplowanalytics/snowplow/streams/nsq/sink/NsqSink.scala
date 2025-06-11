@@ -28,10 +28,20 @@ private[nsq] object NsqSink {
 
   def resource[F[_]: Async](config: NsqSinkConfig): Resource[F, Sink[F]] =
     mkPublisher[F](config).map { p =>
-      Sink(sinkBatch[F](p, config))
+      new Sink[F] {
+        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+          sinkBatch[F](p, config, batch)
+
+        def pingForHealth: F[Boolean] =
+          Sync[F].pure(true)
+      }
     }
 
-  private def sinkBatch[F[_]: Async](publisher: Publisher, config: NsqSinkConfig)(batch: ListOfList[Sinkable]): F[Unit] =
+  private def sinkBatch[F[_]: Async](
+    publisher: Publisher,
+    config: NsqSinkConfig,
+    batch: ListOfList[Sinkable]
+  ): F[Unit] =
     Sync[F]
       .blocking {
         batch
