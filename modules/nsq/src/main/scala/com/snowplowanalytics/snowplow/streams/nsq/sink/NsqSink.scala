@@ -32,7 +32,7 @@ private[nsq] object NsqSink {
         def sink(batch: ListOfList[Sinkable]): F[Unit] =
           sinkBatch[F](p, config, batch)
 
-        def pingForHealth: F[Boolean] =
+        def isHealthy: F[Boolean] =
           Sync[F].pure(true)
       }
     }

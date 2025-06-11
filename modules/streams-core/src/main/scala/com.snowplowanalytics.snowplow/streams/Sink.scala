@@ -26,18 +26,21 @@ trait Sink[F[_]] {
   /**
    * Ping the external resource to check it is healthy and ready to receive events
    *
-   * The sink is expected to actively ping the external resource, e.g. by sending a HTTP request.
+   * The sink is expected to probe the external resource just one time, e.g. by sending a HTTP
+   * request, and then return a result
    *
    * This health check can yield any of three results:
    *
-   *   1. `true` (wrapped in `F`). This is the only result that indicates the sink is healthy. 2.
-   *      `false` (wrapped in `F`). This means we successfully probed the external resource, but it
-   *      tells us the external resource is not ready to receive messages. 3. An exception raised
-   *      via the `F`.
+   *   1. `true` (wrapped in `F`). This is the only result that indicates the sink is healthy.
    *
-   * An application calling `pingForHealth` should check for all types of result: true / false /
+   * 2. `false` (wrapped in `F`). This means we successfully probed the external resource, but it
+   * tells us the external resource is not ready to receive messages.
+   *
+   * 3. An exception raised via the `F`.
+   *
+   * An application calling `isHealthy` should check for all types of result: true / false /
    * exception
    */
-  def pingForHealth: F[Boolean]
+  def isHealthy: F[Boolean]
 
 }

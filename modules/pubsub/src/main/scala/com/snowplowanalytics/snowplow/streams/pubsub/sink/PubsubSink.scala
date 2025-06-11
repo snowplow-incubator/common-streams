@@ -41,7 +41,7 @@ private[pubsub] object PubsubSink {
         def sink(batch: ListOfList[Sinkable]): F[Unit] =
           sinkBatch[F](config, stub, batch)
 
-        def pingForHealth: F[Boolean] =
+        def isHealthy: F[Boolean] =
           topicExists(config, stub)
       }
     }

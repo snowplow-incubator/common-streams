@@ -51,7 +51,7 @@ private[kinesis] object KinesisSink {
             batch
           )
 
-        def pingForHealth: F[Boolean] =
+        def isHealthy: F[Boolean] =
           checkShardsAreOpen(config.streamName, p)
       }
     }
