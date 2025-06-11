@@ -11,5 +11,6 @@ import cats.Id
 
 package object nsq {
 
-  type NsqSinkConfig = NsqSinkConfigM[Id]
+  type NsqSinkConfig    = NsqSinkConfigM[Id]
+  type NsqFactory[F[_]] = Factory[F, NsqSourceConfig, NsqSinkConfig]
 }
