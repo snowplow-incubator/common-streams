@@ -11,5 +11,6 @@ import cats.Id
 
 package object kafka {
 
-  type KafkaSinkConfig = KafkaSinkConfigM[Id]
+  type KafkaSinkConfig    = KafkaSinkConfigM[Id]
+  type KafkaFactory[F[_]] = Factory[F, KafkaSourceConfig, KafkaSinkConfig]
 }
