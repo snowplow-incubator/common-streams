@@ -7,12 +7,15 @@
  */
 package com.snowplowanalytics.snowplow.streams.kafka.sink
 
+import cats.implicits._
 import cats.effect.{Async, Resource, Sync}
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSerializer}
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
 import com.snowplowanalytics.snowplow.streams.kafka.KafkaSinkConfig
 
 import java.util.UUID
@@ -31,6 +34,8 @@ private[kafka] object KafkaSink {
       producer <- makeProducer(config, authHandlerClass)
       ec <- createExecutionContext
     } yield impl(config, producer, ec)
+
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   private def makeProducer[F[_]: Async](
     config: KafkaSinkConfig,
@@ -53,16 +58,33 @@ private[kafka] object KafkaSink {
     producer: KafkaProducer[String, Array[Byte]],
     ec: ExecutionContext
   ): Sink[F] =
-    Sink { batch =>
-      val f = Sync[F].delay {
-        val futures = batch.asIterable.map { e =>
-          val record = toProducerRecord(config, e)
-          producer.send(record)
-        }.toIndexedSeq
+    new Sink[F] {
+      def sink(batch: ListOfList[Sinkable]): F[Unit] = {
+        val f = Sync[F].delay {
+          val futures = batch.asIterable.map { e =>
+            val record = toProducerRecord(config, e)
+            producer.send(record)
+          }.toIndexedSeq
 
-        futures.foreach(_.get)
+          futures.foreach(_.get)
+        }
+        Async[F].evalOn(f, ec)
       }
-      Async[F].evalOn(f, ec)
+
+      def isHealthy: F[Boolean] =
+        Logger[F].info(s"Checking whether topic ${config.topicName} has leaders for all partitions") >>
+          Sync[F]
+            .blocking {
+              producer.partitionsFor(config.topicName).asScala
+            }
+            .flatMap { partitions =>
+              if (partitions.isEmpty)
+                Logger[F].warn(s"Topic ${config.topicName} has no partitions").as(false)
+              else if (partitions.exists(p => Option(p.leader()).isEmpty))
+                Logger[F].warn(s"Topic ${config.topicName} has partitions with no leader").as(false)
+              else
+                Logger[F].info(s"Confirmed topic ${config.topicName} has leaders for all partitions").as(true)
+            }
     }
 
   private def toProducerRecord(config: KafkaSinkConfig, sinkable: Sinkable): ProducerRecord[String, Array[Byte]] = {

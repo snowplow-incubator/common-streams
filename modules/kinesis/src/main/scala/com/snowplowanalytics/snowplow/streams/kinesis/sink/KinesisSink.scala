@@ -19,7 +19,14 @@ import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
-import software.amazon.awssdk.services.kinesis.model.{PutRecordsRequest, PutRecordsRequestEntry, PutRecordsResponse}
+import software.amazon.awssdk.services.kinesis.model.{
+  ListShardsRequest,
+  PutRecordsRequest,
+  PutRecordsRequestEntry,
+  PutRecordsResponse,
+  ShardFilter,
+  ShardFilterType
+}
 
 import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, Retries}
 
@@ -34,15 +41,19 @@ private[kinesis] object KinesisSink {
 
   def resource[F[_]: Async](config: KinesisSinkConfig, client: SdkAsyncHttpClient): Resource[F, Sink[F]] =
     mkProducer[F](config, client).map { p =>
-      Sink(
-        writeToKinesis[F](
-          config.throttledBackoffPolicy,
-          RequestLimits(config.recordLimit, config.byteLimit),
-          p,
-          config.streamName,
-          _
-        )
-      )
+      new Sink[F] {
+        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+          writeToKinesis[F](
+            config.throttledBackoffPolicy,
+            RequestLimits(config.recordLimit, config.byteLimit),
+            p,
+            config.streamName,
+            batch
+          )
+
+        def isHealthy: F[Boolean] =
+          checkShardsAreOpen(config.streamName, p)
+      }
     }
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
@@ -57,6 +68,37 @@ private[kinesis] object KinesisSink {
         builder.build()
       }
     }
+
+  private def checkShardsAreOpen[F[_]: Async](streamName: String, client: KinesisAsyncClient): F[Boolean] = {
+    def go(nextToken: Option[String]): F[Boolean] =
+      Async[F]
+        .fromCompletableFuture {
+          Sync[F].delay {
+            val request = ListShardsRequest.builder
+              .streamName(streamName)
+              .shardFilter {
+                ShardFilter.builder.`type`(ShardFilterType.AT_LATEST).build
+              }
+              .nextToken(nextToken.orNull)
+              .build
+            client.listShards(request)
+          }
+        }
+        .flatMap { response =>
+          if (response.hasShards)
+            Logger[F].info(s"Confirmed stream $streamName has open shards").as(true)
+          else {
+            Option(response.nextToken) match {
+              case Some(t) =>
+                go(Some(t))
+              case None =>
+                Logger[F].warn(s"Stream $streamName has no open shards").as(false)
+            }
+          }
+        }
+
+    Logger[F].info(s"Checking whether stream $streamName has open shards") >> go(None)
+  }
 
   private def toKinesisRecords(records: ListOfList[Sinkable]): ListOfList[PutRecordsRequestEntry] =
     records.mapUnordered { r =>
