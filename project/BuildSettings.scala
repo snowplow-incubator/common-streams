@@ -60,7 +60,12 @@ object BuildSettings {
       val license = (Compile / resourceManaged).value / "META-INF" / "LICENSE"
       IO.copyFile(file("LICENSE.md"), license)
       Seq(license)
-    }.taskValue
+    }.taskValue,
+    ThisBuild / publishTo := {
+      val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+      if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+      else localStaging.value
+    }
   )
 
   def scalacOptionsVersion(scalaVersion: String): Seq[String] = {
