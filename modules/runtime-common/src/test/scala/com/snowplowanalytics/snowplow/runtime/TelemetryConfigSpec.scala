@@ -7,11 +7,9 @@
  */
 package com.snowplowanalytics.snowplow.runtime
 
-import cats.implicits._
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
-import io.circe.literal._
 import io.circe.generic.semiauto._
 import org.http4s.implicits._
 import org.specs2.Specification

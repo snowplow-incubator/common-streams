@@ -34,7 +34,7 @@ import com.snowplowanalytics.snowplow.sbt.IgluSchemaPlugin.autoImport._
 object BuildSettings {
 
   lazy val scala212 = "2.12.18"
-  lazy val scala213 = "2.13.12"
+  lazy val scala213 = "2.13.15"
 
   lazy val buildSettings = Seq(
     organization := "com.snowplowanalytics",
@@ -42,8 +42,7 @@ object BuildSettings {
     crossScalaVersions := List(scala212, scala213),
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
-    scalacOptions += "-Ywarn-macros:after",
-    scalacOptions += "-Wconf:origin=scala.collection.compat.*:s",
+    scalacOptions ++= scalacOptionsVersion(scalaVersion.value),
     Test / fork := true,
     Test / envVars := Map(
       "CONFIG_PARSER_TEST_ENV" -> "envValue",
@@ -63,6 +62,17 @@ object BuildSettings {
       Seq(license)
     }.taskValue
   )
+
+  def scalacOptionsVersion(scalaVersion: String): Seq[String] = {
+    // Scala 2.12 needs -Ywarn-macros:after to match the default compiler behaviour of scala 2.13.
+    val versionSpecificOptions = CrossVersion.partialVersion(scalaVersion) match {
+      case Some((2, scalaMajor)) if scalaMajor == 12 => Seq("-Ywarn-macros:after")
+      case _                                         => Nil
+    }
+    Seq(
+      "-Wconf:origin=scala.collection.compat.*:s"
+    ) ++ versionSpecificOptions
+  }
 
   lazy val publishSettings = Seq[Setting[_]](
     publishArtifact := true,
