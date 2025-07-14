@@ -34,7 +34,7 @@ import com.snowplowanalytics.snowplow.sbt.IgluSchemaPlugin.autoImport._
 object BuildSettings {
 
   lazy val scala212 = "2.12.18"
-  lazy val scala213 = "2.13.12"
+  lazy val scala213 = "2.13.15"
 
   lazy val buildSettings = Seq(
     organization := "com.snowplowanalytics",
@@ -42,8 +42,7 @@ object BuildSettings {
     crossScalaVersions := List(scala212, scala213),
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
-    scalacOptions += "-Ywarn-macros:after",
-    scalacOptions += "-Wconf:origin=scala.collection.compat.*:s",
+    scalacOptions ++= scalacOptionsVersion(scalaVersion.value),
     Test / fork := true,
     Test / envVars := Map(
       "CONFIG_PARSER_TEST_ENV" -> "envValue",
@@ -63,6 +62,20 @@ object BuildSettings {
       Seq(license)
     }.taskValue
   )
+
+  def scalacOptionsVersion(scalaVersion: String): Seq[String] = {
+    // We need to use '-Ywarn-macros:default' flag due to following issue in specs2
+    // https://github.com/etorreborre/specs2/issues/1237
+    // However, Scala 2.12.18 doesn't allow to set it to 'default' therefore we need to
+    // continue to use 'after' with it.
+    val versionSpecificOptions = CrossVersion.partialVersion(scalaVersion) match {
+      case Some((2, scalaMajor)) if scalaMajor == 12 => "-Ywarn-macros:after"
+      case _                                         => "-Ywarn-macros:default"
+    }
+    Seq(
+      "-Wconf:origin=scala.collection.compat.*:s"
+    ) :+ versionSpecificOptions
+  }
 
   lazy val publishSettings = Seq[Setting[_]](
     publishArtifact := true,

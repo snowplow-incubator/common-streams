@@ -7,7 +7,6 @@
  */
 package com.snowplowanalytics.snowplow.streams.kinesis
 
-import io.circe.literal._
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
