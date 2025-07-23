@@ -1,3 +1,17 @@
+Version 0.13.0 (2025-07-23)
+--------------------------
+Reduce default maxRecordSize of Pubsub sink to 9 MB (#126)
+Bump sbt-ci-release to 1.11.1 (#127)
+Add new method `isHealthy` to sinks (#124)
+Define sink factory types for easier imports in apps (#125)
+Pubsub Source/Sink to work with emulator for local developent (#123)
+Factory classes to create sources/streams sharing underlying resources (#122)
+Pubsub sink elimate Publisher wrapper (#121)
+Kafka sink to use single-threaded executor for blocking operations (#120)
+Sink configs should allow for optional sinks (#115)
+Remove dependency on snowplow scala tracker (#114)
+Add NSQ module (#119)
+
 Version 0.12.0 (2025-04-22)
 --------------------------
 Add group.instance.id to kafka consumer config (#116)
