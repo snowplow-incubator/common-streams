@@ -32,8 +32,9 @@ private[kafka] object KafkaSink {
   ): Resource[F, Sink[F]] =
     for {
       producer <- makeProducer(config, authHandlerClass)
-      ec <- createExecutionContext
-    } yield impl(config, producer, ec)
+      ec1 <- createExecutionContext
+      ec2 <- createExecutionContext
+    } yield impl(config, producer, ec1, ec2)
 
   private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
@@ -56,19 +57,23 @@ private[kafka] object KafkaSink {
   private def impl[F[_]: Async](
     config: KafkaSinkConfig,
     producer: KafkaProducer[String, Array[Byte]],
-    ec: ExecutionContext
+    ecForSend: ExecutionContext,
+    ecForWait: ExecutionContext
   ): Sink[F] =
     new Sink[F] {
       def sink(batch: ListOfList[Sinkable]): F[Unit] = {
-        val f = Sync[F].delay {
-          val futures = batch.asIterable.map { e =>
+        val futures = Sync[F].delay {
+          batch.asIterable.map { e =>
             val record = toProducerRecord(config, e)
             producer.send(record)
           }.toIndexedSeq
-
-          futures.foreach(_.get)
         }
-        Async[F].evalOn(f, ec)
+        Async[F].evalOn(futures, ecForSend).flatMap { fs =>
+          val await = Sync[F].delay {
+            fs.foreach(_.get)
+          }
+          Async[F].evalOn(await, ecForWait)
+        }
       }
 
       def isHealthy: F[Boolean] =
