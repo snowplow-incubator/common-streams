@@ -38,10 +38,14 @@ class PubsubSourceConfigSpec extends Specification {
     val expected = PubsubSourceConfig(
       subscription            = PubsubSourceConfig.Subscription("my-project", "my-subscription"),
       parallelPullFactor      = BigDecimal(0.5),
-      durationPerAckExtension = 1.minute,
+      durationPerAckExtension = 15.seconds,
       minRemainingAckDeadline = BigDecimal(0.1),
       maxMessagesPerPull      = 1000,
-      debounceRequests        = 100.millis
+      debounceRequests        = 100.millis,
+      streamingPull           = true,
+      retries = PubsubSourceConfig.Retries(
+        transientErrors = PubsubSourceConfig.TransientErrorRetrying(100.millis, 10)
+      )
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

@@ -10,36 +10,28 @@ package com.snowplowanalytics.snowplow.streams.pubsub.source
 import cats.effect.{Async, Ref, Resource, Sync}
 import cats.effect.kernel.Unique
 import cats.implicits._
-import fs2.{Chunk, Pipe, Stream}
+import fs2.{Chunk, Stream}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 // pubsub
 import com.google.api.gax.core.{CredentialsProvider, FixedExecutorProvider}
 import com.google.api.gax.rpc.FixedTransportChannelProvider
-import com.google.pubsub.v1.{PullRequest, PullResponse, ReceivedMessage}
+import com.google.pubsub.v1.ReceivedMessage
 import com.google.cloud.pubsub.v1.stub.{GrpcSubscriberStub, SubscriberStub, SubscriberStubSettings}
 
 // snowplow
 import com.snowplowanalytics.snowplow.streams.SourceAndAck
 import com.snowplowanalytics.snowplow.streams.internal.{Checkpointer, LowLevelEvents, LowLevelSource}
-import com.snowplowanalytics.snowplow.streams.pubsub.{FutureInterop, PubsubSourceConfig}
-import com.snowplowanalytics.snowplow.streams.pubsub.PubsubRetryOps.implicits._
+import com.snowplowanalytics.snowplow.streams.pubsub.PubsubSourceConfig
 
 import scala.concurrent.duration.{Duration, DurationLong, FiniteDuration}
-import scala.jdk.CollectionConverters._
 
 /**
  * A common-streams `Source` that pulls messages from PubSub
  *
- * This Source is a wrapper around a GRPC stub. It uses the "Unary Pull" GRPC method to fetch
- * events.
- *
- * Note that "Unary Pull" GRPC is different to the "Streaming Pull" GRPC used by the 3rd-party
- * java-pubsub library. We use "Unary Pull" to avoid a problem in which PubSub occasionally
- * re-delivers the same messages, causing downstream duplicates. The problem happened especially in
- * apps like Lake Loader, which builds up a very large number of un-acked messages and then acks
- * them all in one go at the end of a timed window.
+ * This Source is a wrapper around a GRPC stub. It can use either "Unary Pull" or "Streaming Pull"
+ * GRPC methods to fetch events, based on the `streamingPull` configuration parameter.
  */
 private[pubsub] object PubsubSource {
 
@@ -63,7 +55,7 @@ private[pubsub] object PubsubSource {
     refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
   ): LowLevelSource[F, Vector[Unique.Token]] =
     new LowLevelSource[F, Vector[Unique.Token]] {
-      def checkpointer: Checkpointer[F, Vector[Unique.Token]] = new PubsubCheckpointer(config.subscription, stub, refStates)
+      def checkpointer: Checkpointer[F, Vector[Unique.Token]] = new PubsubCheckpointer(config, stub, refStates)
 
       def stream: Stream[F, Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
         pubsubStream(config, stub, refStates)
@@ -76,26 +68,20 @@ private[pubsub] object PubsubSource {
     stub: SubscriberStub,
     refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
   ): Stream[F, Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
-    for {
-      parallelPullCount <- Stream.eval(Sync[F].delay(chooseNumParallelPulls(config)))
-    } yield Stream
-      .fixedRateStartImmediately(config.debounceRequests, dampen = true)
-      .through(parEvalMapUnorderedOrPrefetch(parallelPullCount)(_ => pullAndManageState(config, stub, refStates)))
-      .concurrently(extendDeadlines(config, stub, refStates))
-      .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
+    Stream.emit {
+      val source =
+        if (config.streamingPull)
+          StreamingPullSource.stream(config, stub, refStates)
+        else
+          UnaryPullSource.stream(config, stub, refStates)
 
-  private def parEvalMapUnorderedOrPrefetch[F[_]: Async, A, B](parallelPullCount: Int)(f: A => F[B]): Pipe[F, A, B] =
-    if (parallelPullCount === 1)
-      // If parallelPullCount is 1, we need a prefetch so the behaviour of this source is roughly
-      // consistent with other sources and other values of parallePullCount
-      _.evalMap(f).prefetch
-    else
-      // If parallelPullCount > 1, then we don't need prefetch, because parEvalMapUnordered already
-      // has the effect of pre-fetching
-      _.parEvalMapUnordered(parallelPullCount)(f)
+      source
+        .concurrently(extendDeadlines(config, stub, refStates))
+        .onFinalize(nackRefStatesForShutdown(config, stub, refStates))
+    }
 
   /**
-   * Pulls a batch of messages from pubsub and then manages the state of the batch
+   * Function to be called immediately after receiving pubsub message so we can start managing state
    *
    * Managing state of the batch includes:
    *
@@ -103,31 +89,28 @@ private[pubsub] object PubsubSource {
    *   - Generate a unique token by which to identify this batch internally
    *   - Add the batch to the local "State" so that we can re-extend the ack deadline if needed
    */
-  private def pullAndManageState[F[_]: Async](
+  private[source] def handleReceivedMessages[F[_]: Async](
     config: PubsubSourceConfig,
     stub: SubscriberStub,
-    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]],
+    modAckImmediately: Boolean,
+    records: Vector[ReceivedMessage]
   ): F[Option[LowLevelEvents[Vector[Unique.Token]]]] =
-    pullFromSubscription(config, stub).flatMap { response =>
-      if (response.getReceivedMessagesCount > 0) {
-        val records = response.getReceivedMessagesList.asScala.toVector
-        val chunk   = Chunk.from(records.map(_.getMessage.getData.asReadOnlyByteBuffer()))
-        val ackIds  = records.map(_.getAckId)
-        Sync[F].uncancelable { _ =>
-          for {
-            _ <- Logger[F].trace {
-                   records.map(_.getMessage.getMessageId).mkString("Pubsub message IDs: ", ",", "")
-                 }
-            timeReceived <- Sync[F].realTimeInstant
-            _ <- Utils.modAck[F](config.subscription, stub, ackIds, config.durationPerAckExtension)
-            token <- Unique[F].unique
-            currentDeadline = timeReceived.plusMillis(config.durationPerAckExtension.toMillis)
-            _ <- refStates.update(_ + (token -> PubsubBatchState(currentDeadline, ackIds)))
-          } yield Some(LowLevelEvents(chunk, Vector(token), Some(earliestTimestampOfRecords(records))))
-        }
-      } else {
-        none.pure[F]
-      }
+    if (records.nonEmpty) {
+      val chunk  = Chunk.from(records.map(_.getMessage.getData.asReadOnlyByteBuffer()))
+      val ackIds = records.map(_.getAckId)
+      for {
+        _ <- Logger[F].trace {
+               records.map(_.getMessage.getMessageId).mkString("Pubsub message IDs: ", ",", "")
+             }
+        timeReceived <- Sync[F].realTimeInstant
+        _ <- if (modAckImmediately) Utils.modAck[F](config, stub, ackIds, config.durationPerAckExtension) else Sync[F].unit
+        token <- Unique[F].unique
+        currentDeadline = timeReceived.plusMillis(config.durationPerAckExtension.toMillis)
+        _ <- refStates.update(_ + (token -> PubsubBatchState(currentDeadline, ackIds)))
+      } yield Some(LowLevelEvents(chunk, Vector(token), Some(earliestTimestampOfRecords(records))))
+    } else {
+      none.pure[F]
     }
 
   private def earliestTimestampOfRecords(records: Vector[ReceivedMessage]): FiniteDuration = {
@@ -148,33 +131,8 @@ private[pubsub] object PubsubSource {
     refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
   ): F[Unit] =
     refStates.getAndSet(Map.empty).flatMap { m =>
-      Utils.modAck(config.subscription, stub, m.values.flatMap(_.ackIds.toVector).toVector, Duration.Zero)
+      Utils.modAck(config, stub, m.values.flatMap(_.ackIds.toVector).toVector, Duration.Zero)
     }
-
-  /**
-   * Wrapper around the "Pull" PubSub GRPC.
-   *
-   * @return
-   *   The PullResponse, comprising a batch of pubsub messages
-   */
-  private def pullFromSubscription[F[_]: Async](
-    config: PubsubSourceConfig,
-    stub: SubscriberStub
-  ): F[PullResponse] = {
-    val request = PullRequest.newBuilder
-      .setSubscription(config.subscription.show)
-      .setMaxMessages(config.maxMessagesPerPull)
-      .build
-    val io = for {
-      apiFuture <- Sync[F].delay(stub.pullCallable.futureCall(request))
-      res <- FutureInterop.fromFuture[F, PullResponse](apiFuture)
-    } yield res
-    Logger[F].debug("Pulling from subscription") *>
-      io.retryingOnTransientGrpcFailures
-        .flatTap { response =>
-          Logger[F].debug(s"Pulled ${response.getReceivedMessagesCount} messages")
-        }
-  }
 
   /**
    * Modify ack deadlines if we need more time to process the messages
@@ -213,7 +171,7 @@ private[pubsub] object PubsubSource {
           Sync[F].sleep(0.5 * config.minRemainingAckDeadline.toDouble * config.durationPerAckExtension)
         else {
           val ackIds = toExtend.sortBy(_.currentDeadline).flatMap(_.ackIds)
-          Utils.modAck[F](config.subscription, stub, ackIds, config.durationPerAckExtension)
+          Utils.modAck[F](config, stub, ackIds, config.durationPerAckExtension)
         }
       }
       .repeat
@@ -239,17 +197,5 @@ private[pubsub] object PubsubSource {
 
     Resource.make(Sync[F].delay(GrpcSubscriberStub.create(stubSettings)))(stub => Sync[F].blocking(stub.shutdownNow))
   }
-
-  /**
-   * Converts `parallelPullFactor` to a suggested number of parallel pulls
-   *
-   * For bigger instances (more cores) the downstream processor can typically process events more
-   * quickly. So the PubSub subscriber needs more parallelism in order to keep downstream saturated
-   * with events.
-   */
-  private def chooseNumParallelPulls(config: PubsubSourceConfig): Int =
-    (Runtime.getRuntime.availableProcessors * config.parallelPullFactor)
-      .setScale(0, BigDecimal.RoundingMode.UP)
-      .toInt
 
 }

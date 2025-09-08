@@ -24,7 +24,7 @@ import scala.concurrent.duration.FiniteDuration
  *   Controls how many RPCs may be opened concurrently from the client to the PubSub server. The
  *   maximum number of RPCs is equal to this factor multiplied by the number of available cpu cores.
  *   Increasing this factor can increase the rate of events provided by the Source to the
- *   application.
+ *   application. Only used when `streamingPull` is false.
  * @param durationPerAckExtension
  *   Ack deadlines are extended for this duration. For common-streams apps this should be set
  *   slightly larger than the maximum time we expect between app receiving the message and acking
@@ -36,11 +36,20 @@ import scala.concurrent.duration.FiniteDuration
  *   `minRemainingAckDeadline` is `0.1` then the Source will wait until there is `6 seconds` left of
  *   the remining deadline, before re-extending the message deadline.
  * @param maxMessagesPerPull
- *   How many pubsub messages to pull from the server in a single request.
+ *   How many pubsub messages to pull from the server in a single request. Only used when
+ *   `streamingPull` is false.
  * @param debounceRequests
  *   Adds an artifical delay between consecutive requests to pubsub for more messages. Under some
  *   circumstances, this was found to slightly alleviate a problem in which pubsub might re-deliver
- *   the same messages multiple times.
+ *   the same messages multiple times. Only used when `streamingPull` is false.
+ * @param streamingPull
+ *   Controls whether to use "Streaming Pull" (true) or "Unary Pull" (false) GRPC method to fetch
+ *   events. Use "Unary Pull" (false) for apps which have long delays in between acks (e.g. Lake
+ *   Loader), to avoid a problem in which PubSub occasionally re-delivers the same messages, causing
+ *   downstream duplicates. Use "Streaming Pull" (true) for apps that ack often, and which have
+ *   lower latency requirements (e.g. Enrich).
+ * @param retries
+ *   Configuration for retrying transient errors
  */
 case class PubsubSourceConfig(
   subscription: PubsubSourceConfig.Subscription,
@@ -48,10 +57,16 @@ case class PubsubSourceConfig(
   durationPerAckExtension: FiniteDuration,
   minRemainingAckDeadline: BigDecimal,
   maxMessagesPerPull: Int,
-  debounceRequests: FiniteDuration
+  debounceRequests: FiniteDuration,
+  streamingPull: Boolean,
+  retries: PubsubSourceConfig.Retries
 )
 
 object PubsubSourceConfig {
+
+  case class TransientErrorRetrying(delay: FiniteDuration, attempts: Int)
+
+  case class Retries(transientErrors: TransientErrorRetrying)
 
   case class Subscription(projectId: String, subscriptionId: String)
 
@@ -71,5 +86,9 @@ object PubsubSourceConfig {
           Left("Expected format: projects/<project>/subscriptions/<subscription>")
       }
 
-  implicit def decoder: Decoder[PubsubSourceConfig] = deriveDecoder[PubsubSourceConfig]
+  implicit def decoder: Decoder[PubsubSourceConfig] = {
+    implicit val transientErrorDecoder = deriveDecoder[TransientErrorRetrying]
+    implicit val retriesDecoder        = deriveDecoder[Retries]
+    deriveDecoder[PubsubSourceConfig]
+  }
 }

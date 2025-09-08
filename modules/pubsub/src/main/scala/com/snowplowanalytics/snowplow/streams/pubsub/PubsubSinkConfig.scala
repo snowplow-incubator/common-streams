@@ -10,14 +10,23 @@ package com.snowplowanalytics.snowplow.streams.pubsub
 import cats.Id
 import io.circe.Decoder
 import io.circe.generic.semiauto._
+import io.circe.config.syntax._
+
+import scala.concurrent.duration.FiniteDuration
 
 case class PubsubSinkConfigM[M[_]](
   topic: M[PubsubSinkConfig.Topic],
   batchSize: Int,
-  requestByteThreshold: Int
+  requestByteThreshold: Int,
+  retries: PubsubSinkConfig.Retries
 )
 
 object PubsubSinkConfig {
+
+  case class TransientErrorRetrying(delay: FiniteDuration, attempts: Int)
+
+  case class Retries(transientErrors: TransientErrorRetrying)
+
   case class Topic(projectId: String, topicId: String)
 }
 
@@ -34,13 +43,20 @@ object PubsubSinkConfigM {
           Left("Expected format: projects/<project>/topics/<topic>")
       }
 
-  implicit def decoder: Decoder[PubsubSinkConfig] = deriveDecoder[PubsubSinkConfig]
+  implicit def decoder: Decoder[PubsubSinkConfig] = {
+    implicit val transientErrorDecoder = deriveDecoder[TransientErrorRetrying]
+    implicit val retriesDecoder        = deriveDecoder[Retries]
+    deriveDecoder[PubsubSinkConfig]
+  }
 
-  implicit def optionalDecoder: Decoder[Option[PubsubSinkConfig]] =
+  implicit def optionalDecoder: Decoder[Option[PubsubSinkConfig]] = {
+    implicit val transientErrorDecoder = deriveDecoder[TransientErrorRetrying]
+    implicit val retriesDecoder        = deriveDecoder[Retries]
     deriveDecoder[PubsubSinkConfigM[Option]].map {
-      case PubsubSinkConfigM(Some(t), a, b) =>
-        Some(PubsubSinkConfigM[Id](t, a, b))
+      case PubsubSinkConfigM(Some(t), a, b, c) =>
+        Some(PubsubSinkConfigM[Id](t, a, b, c))
       case _ =>
         None
     }
+  }
 }
