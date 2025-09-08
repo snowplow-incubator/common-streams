@@ -35,7 +35,7 @@ import com.snowplowanalytics.snowplow.streams.pubsub.PubsubRetryOps.implicits._
  *   state.
  */
 private class PubsubCheckpointer[F[_]: Async](
-  subscription: PubsubSourceConfig.Subscription,
+  config: PubsubSourceConfig,
   stub: SubscriberStub,
   refAckIds: Ref[F, Map[Unique.Token, PubsubBatchState]]
 ) extends Checkpointer[F, Vector[Unique.Token]] {
@@ -57,12 +57,13 @@ private class PubsubCheckpointer[F[_]: Async](
     for {
       ackDatas <- refAckIds.modify(m => (m -- c, c.flatMap(m.get)))
       _ <- ackDatas.flatMap(_.ackIds).grouped(1000).toVector.traverse_ { ackIds =>
-             val request = AcknowledgeRequest.newBuilder.setSubscription(subscription.show).addAllAckIds(ackIds.asJava).build
+             val request = AcknowledgeRequest.newBuilder.setSubscription(config.subscription.show).addAllAckIds(ackIds.asJava).build
              val attempt = for {
                apiFuture <- Sync[F].delay(stub.acknowledgeCallable.futureCall(request))
                _ <- FutureInterop.fromFuture[F, com.google.protobuf.Empty](apiFuture)
              } yield ()
-             attempt.retryingOnTransientGrpcFailures
+             attempt
+               .retryingOnTransientGrpcFailures(config.retries.transientErrors.delay, config.retries.transientErrors.attempts)
                .recoveringOnGrpcInvalidArgument { s =>
                  // This can happen if ack IDs have expired before we acked
                  Logger[F].info(s"Ignoring error from GRPC when acking: ${s.getDescription}")
@@ -81,6 +82,6 @@ private class PubsubCheckpointer[F[_]: Async](
       ackDatas <- refAckIds.modify(m => (m -- c, c.flatMap(m.get)))
       ackIds = ackDatas.flatMap(_.ackIds)
       // A nack is just a modack with zero duration
-      _ <- Utils.modAck[F](subscription, stub, ackIds, Duration.Zero)
+      _ <- Utils.modAck[F](config, stub, ackIds, Duration.Zero)
     } yield ()
 }

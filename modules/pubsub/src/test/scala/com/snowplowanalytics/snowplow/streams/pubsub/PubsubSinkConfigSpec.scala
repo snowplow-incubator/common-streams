@@ -14,6 +14,8 @@ import io.circe.Decoder
 import io.circe.generic.semiauto._
 import org.specs2.Specification
 
+import scala.concurrent.duration.DurationLong
+
 class PubsubSinkConfigSpec extends Specification {
   import PubsubSinkConfigSpec._
 
@@ -37,7 +39,10 @@ class PubsubSinkConfigSpec extends Specification {
     val expected = PubsubSinkConfigM[Id](
       topic                = PubsubSinkConfig.Topic("my-project", "my-topic"),
       batchSize            = 1000,
-      requestByteThreshold = 1000000
+      requestByteThreshold = 1000000,
+      retries = PubsubSinkConfig.Retries(
+        transientErrors = PubsubSinkConfig.TransientErrorRetrying(100.millis, 10)
+      )
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

@@ -41,7 +41,11 @@ class PubsubSourceConfigSpec extends Specification {
       durationPerAckExtension = 1.minute,
       minRemainingAckDeadline = BigDecimal(0.1),
       maxMessagesPerPull      = 1000,
-      debounceRequests        = 100.millis
+      debounceRequests        = 100.millis,
+      streamingPull           = true,
+      retries = PubsubSourceConfig.Retries(
+        transientErrors = PubsubSourceConfig.TransientErrorRetrying(100.millis, 10)
+      )
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>
