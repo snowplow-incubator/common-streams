@@ -1,3 +1,8 @@
+Version 0.14.0 (2025-09-23)
+--------------------------
+Upgrade dependencies to latest versions (#132)
+Pubsub source can use streaming pull (#131)
+
 Version 0.13.1 (2025-08-01)
 --------------------------
 Fix for blocked thread in Kafka sink (#129)
