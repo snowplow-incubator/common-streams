@@ -11,31 +11,32 @@ object Dependencies {
 
   object V {
     // Scala
-    val cats             = "2.10.0"
-    val catsEffect       = "3.5.4"
+    val cats             = "2.13.0"
+    val catsEffect       = "3.6.3"
     val catsRetry        = "3.1.3"
-    val fs2              = "3.10.0"
-    val log4cats         = "2.6.0"
-    val http4s           = "0.23.28"
+    val fs2              = "3.12.2"
+    val log4cats         = "2.7.1"
+    val http4s           = "0.23.31"
     val blaze            = "0.23.17"
     val decline          = "2.4.1"
-    val circe            = "0.14.8"
+    val circe            = "0.14.14"
     val circeExtra       = "0.14.4"
-    val circeConfig      = "0.10.1"
+    val circeConfig      = "0.10.2"
     val betterMonadicFor = "0.3.1"
     val kindProjector    = "0.13.3"
     val collectionCompat = "2.11.0"
 
     // Streams
-    val fs2Kafka      = "3.6.0"
-    val pubsub        = "1.136.1"
-    val awsSdk2       = "2.30.17"
-    val kinesisClient = "2.6.1"
+    val fs2Kafka      = "3.9.0"
+    val pubsub        = "1.141.4"
+    val awsSdk2       = "2.34.1"
+    val kinesisClient = "2.7.1"
 
     // java
-    val slf4j    = "2.0.12"
-    val azureSdk = "1.15.1"
-    val nsq      = "1.5.2"
+    val slf4j    = "2.0.17"
+    val azureSdk = "1.18.0"
+    val nsq      = "1.6.0"
+    val jwt      = "10.5"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
@@ -86,10 +87,11 @@ object Dependencies {
   val slf4jIt             = "org.slf4j"          % "slf4j-simple"               % V.slf4j
 
   // java
-  val slf4jSimple   = "org.slf4j"        % "slf4j-simple"   % V.slf4j
-  val slf4jApi      = "org.slf4j"        % "slf4j-api"      % V.slf4j
-  val azureIdentity = "com.azure"        % "azure-identity" % V.azureSdk
-  val nsq           = "com.sproutsocial" % "nsq-j"          % V.nsq
+  val slf4jSimple   = "org.slf4j"        % "slf4j-simple"    % V.slf4j
+  val slf4jApi      = "org.slf4j"        % "slf4j-api"       % V.slf4j
+  val azureIdentity = "com.azure"        % "azure-identity"  % V.azureSdk
+  val nsq           = "com.sproutsocial" % "nsq-j"           % V.nsq
+  val jwt           = "com.nimbusds"     % "nimbus-jose-jwt" % V.jwt
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
   val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
@@ -145,6 +147,7 @@ object Dependencies {
     circeConfig,
     circeGeneric,
     azureIdentity,
+    jwt,
     specs2
   )
 
