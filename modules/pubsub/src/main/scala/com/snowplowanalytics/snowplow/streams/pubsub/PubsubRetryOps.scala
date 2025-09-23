@@ -7,25 +7,60 @@
  */
 package com.snowplowanalytics.snowplow.streams.pubsub
 
+import cats.MonadError
 import cats.implicits._
-import cats.effect.Async
+import cats.effect.{Async, Poll}
 import com.google.api.gax.rpc.{ApiException, StatusCode}
 import io.grpc.Status
 import org.typelevel.log4cats.Logger
-import retry.RetryPolicies
+import retry.{RetryPolicies, Sleep}
 import retry.implicits._
 
-import scala.concurrent.duration.DurationDouble
+import scala.concurrent.duration.FiniteDuration
 
 private[pubsub] object PubsubRetryOps {
 
   object implicits {
     implicit class Ops[F[_], A](val f: F[A]) extends AnyVal {
 
-      def retryingOnTransientGrpcFailures(implicit F: Async[F], L: Logger[F]): F[A] =
+      /**
+       * Retries an effect when an exception matches known retryable GRPC errors
+       *
+       * The retry policy is full jitter, with capped number of attempts
+       */
+      def retryingOnTransientGrpcFailures(retryDelay: FiniteDuration, retryAttempts: Int)(implicit F: Async[F], L: Logger[F]): F[A] =
+        retryingOnTransientGrpcFailuresImpl(retryDelay, retryAttempts)
+
+      /**
+       * Retries an effect when an exception matches known retryable GRPC errors
+       *
+       * The retry policy is full jitter, with capped number of attempts
+       *
+       * This variant takes a `Poll[F]` as a parameter. This is helpful when the effect is run
+       * inside `Sync[F].uncancelable` but we don't mind if the effect is cancelled in between retry
+       * attempts.
+       */
+      def retryingOnTransientGrpcFailuresWithCancelableSleep(
+        retryDelay: FiniteDuration,
+        retryAttempts: Int,
+        poll: Poll[F]
+      )(implicit F: Async[F],
+        L: Logger[F]
+      ): F[A] = {
+        implicit val s: Sleep[F] = (delay: FiniteDuration) => poll(Async[F].sleep(delay))
+        retryingOnTransientGrpcFailuresImpl(retryDelay, retryAttempts)
+      }
+
+      private def retryingOnTransientGrpcFailuresImpl(
+        retryDelay: FiniteDuration,
+        retryAttempts: Int
+      )(implicit F: MonadError[F, Throwable],
+        L: Logger[F],
+        s: Sleep[F]
+      ): F[A] =
         f.retryingOnSomeErrors(
           isWorthRetrying = { e => isRetryableException(e).pure[F] },
-          policy          = RetryPolicies.fullJitter(1.second),
+          policy          = RetryPolicies.fullJitter[F](retryDelay).join(RetryPolicies.limitRetries(retryAttempts - 1)),
           onError = { case (t, _) =>
             Logger[F].info(t)(s"Pubsub retryable GRPC error will be retried: ${t.getMessage}")
           }

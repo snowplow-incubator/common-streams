@@ -22,14 +22,14 @@ import scala.jdk.CollectionConverters._
 private[source] object Utils {
 
   def modAck[F[_]: Async: Logger](
-    subscription: PubsubSourceConfig.Subscription,
+    config: PubsubSourceConfig,
     stub: SubscriberStub,
     ackIds: Vector[String],
     duration: FiniteDuration
   ): F[Unit] =
     ackIds.grouped(1000).toVector.traverse_ { group =>
       val request = ModifyAckDeadlineRequest.newBuilder
-        .setSubscription(subscription.show)
+        .setSubscription(config.subscription.show)
         .addAllAckIds(group.asJava)
         .setAckDeadlineSeconds(duration.toSeconds.toInt)
         .build
@@ -39,7 +39,7 @@ private[source] object Utils {
         _ <- FutureInterop.fromFuture_(apiFuture)
       } yield ()
 
-      io.retryingOnTransientGrpcFailures
+      io.retryingOnTransientGrpcFailures(config.retries.transientErrors.delay, config.retries.transientErrors.attempts)
         .recoveringOnGrpcInvalidArgument { s =>
           // This can happen if ack IDs were acked before we modAcked
           Logger[F].info(s"Ignoring error from GRPC when modifying ack IDs: ${s.getDescription}")

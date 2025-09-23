@@ -80,7 +80,7 @@ private[pubsub] object PubsubSink {
           apiFuture <- Sync[F].delay(stub.publishCallable.futureCall(request))
           _ <- FutureInterop.fromFuture_(apiFuture)
         } yield ()
-        io.retryingOnTransientGrpcFailures
+        io.retryingOnTransientGrpcFailures(config.retries.transientErrors.delay, config.retries.transientErrors.attempts)
       }
 
   /**
