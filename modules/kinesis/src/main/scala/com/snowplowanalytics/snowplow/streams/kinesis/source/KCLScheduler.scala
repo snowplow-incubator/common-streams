@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.kinesis.common.{ConfigsBuilder, InitialPositionInStream, InitialPositionInStreamExtended}
 import software.amazon.kinesis.coordinator.{Scheduler, WorkerStateChangeListener}
-import software.amazon.kinesis.metrics.MetricsLevel
+import software.amazon.kinesis.metrics.NullMetricsFactory
 import software.amazon.kinesis.processor.SingleStreamTracker
 import software.amazon.kinesis.retrieval.fanout.FanOutConfig
 import software.amazon.kinesis.retrieval.polling.PollingConfig
@@ -99,7 +99,7 @@ private[source] object KCLScheduler {
         coordinatorConfig,
         leaseManagementConfig,
         configsBuilder.lifecycleConfig,
-        configsBuilder.metricsConfig.metricsLevel(MetricsLevel.NONE),
+        configsBuilder.metricsConfig.metricsFactory(new NullMetricsFactory),
         processorConfig,
         retrievalConfig
       )
