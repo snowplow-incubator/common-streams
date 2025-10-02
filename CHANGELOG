@@ -1,3 +1,7 @@
+Version 0.14.1 (2025-10-02)
+--------------------------
+Clean shutdown logs of kinesis source (#134)
+
 Version 0.14.0 (2025-09-23)
 --------------------------
 Upgrade dependencies to latest versions (#132)
