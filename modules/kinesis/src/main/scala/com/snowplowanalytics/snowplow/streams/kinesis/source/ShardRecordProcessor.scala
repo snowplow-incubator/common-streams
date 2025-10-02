@@ -37,21 +37,27 @@ private[source] object ShardRecordProcessor {
         //   3. The original ShardRecordProcessor is not terminated until after KCL re-aquires the lease
         // This is a very unhealthy state, so we should kill the app.
         val action = KCLAction.KCLError(new RuntimeException(s"Refusing to initialize a duplicate record processor for shard $shardId"))
-        queue.put(action)
+        withHandledInterrupts {
+          queue.put(action)
+        }
       }
     }
 
     override def shardEnded(shardEndedInput: ShardEndedInput): Unit = {
       val countDownLatch = new CountDownLatch(1)
-      queue.put(KCLAction.ShardEnd(shardId, countDownLatch, shardEndedInput))
-      countDownLatch.await()
-      currentShardIds.updateAndGet(_ - shardId)
-      ()
+      withHandledInterrupts {
+        queue.put(KCLAction.ShardEnd(shardId, countDownLatch, shardEndedInput))
+        countDownLatch.await()
+        currentShardIds.updateAndGet(_ - shardId)
+        ()
+      }
     }
 
     override def processRecords(processRecordsInput: ProcessRecordsInput): Unit = {
       val action = KCLAction.ProcessRecords(shardId, processRecordsInput)
-      queue.put(action)
+      withHandledInterrupts {
+        queue.put(action)
+      }
     }
 
     override def leaseLost(leaseLostInput: LeaseLostInput): Unit = {
@@ -62,4 +68,15 @@ private[source] object ShardRecordProcessor {
     override def shutdownRequested(shutdownRequestedInput: ShutdownRequestedInput): Unit = ()
 
   }
+
+  // A `InterruptedException` means the KCL is shutting down this worker, as part of full KCL shutdown.
+  // We catch the exception, in order to avoid ugly stack traces in the log.
+  private def withHandledInterrupts(action: => Unit): Unit =
+    try
+      action
+    catch {
+      case _: InterruptedException =>
+        // It is best practice to mark a thread as interrupted after catching a `InterruptedException`
+        Thread.currentThread().interrupt()
+    }
 }
