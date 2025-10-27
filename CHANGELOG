@@ -1,3 +1,9 @@
+Version 0.15.0 (2025-11-05)
+--------------------------
+Kafka Soruce change from async to sync for committing offsets (#139)
+Add configurable AWS SDK retry count for Kinesis sink (#137)
+Remove configurability of telemetry interval (#136)
+
 Version 0.14.1 (2025-10-02)
 --------------------------
 Clean shutdown logs of kinesis source (#134)
