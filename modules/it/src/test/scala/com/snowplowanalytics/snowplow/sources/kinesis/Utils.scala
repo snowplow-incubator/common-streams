@@ -103,7 +103,8 @@ object Utils {
     BackoffPolicy(1.second, 1.second),
     1000,
     1000000,
-    Some(endpoint)
+    Some(endpoint),
+    10
   )
 
   def testProcessor(ref: Ref[IO, List[ReceivedEvents]]): EventProcessor[IO] =
