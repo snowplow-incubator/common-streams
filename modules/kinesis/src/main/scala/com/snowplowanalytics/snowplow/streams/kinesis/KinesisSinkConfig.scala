@@ -18,7 +18,8 @@ case class KinesisSinkConfigM[M[_]](
   throttledBackoffPolicy: BackoffPolicy,
   recordLimit: Int,
   byteLimit: Int,
-  customEndpoint: Option[URI]
+  customEndpoint: Option[URI],
+  maxRetries: Int
 )
 
 object KinesisSinkConfigM {
@@ -27,8 +28,8 @@ object KinesisSinkConfigM {
 
   implicit def optionalDecoder: Decoder[Option[KinesisSinkConfig]] =
     deriveDecoder[KinesisSinkConfigM[Option]].map {
-      case KinesisSinkConfigM(Some(s), a, b, c, d) =>
-        Some(KinesisSinkConfigM[Id](s, a, b, c, d))
+      case KinesisSinkConfigM(Some(s), a, b, c, d, e) =>
+        Some(KinesisSinkConfigM[Id](s, a, b, c, d, e))
       case _ =>
         None
     }

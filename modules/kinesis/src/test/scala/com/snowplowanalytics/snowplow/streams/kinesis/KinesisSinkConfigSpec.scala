@@ -40,7 +40,8 @@ class KinesisSinkConfigSpec extends Specification {
       throttledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
       recordLimit            = 500,
       byteLimit              = 5242880,
-      customEndpoint         = None
+      customEndpoint         = None,
+      maxRetries             = 10
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

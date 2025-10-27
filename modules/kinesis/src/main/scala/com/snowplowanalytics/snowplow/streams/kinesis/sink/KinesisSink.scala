@@ -16,6 +16,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.syntax.all._
 
 import software.amazon.awssdk.core.SdkBytes
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
@@ -27,6 +28,7 @@ import software.amazon.awssdk.services.kinesis.model.{
   ShardFilter,
   ShardFilterType
 }
+import software.amazon.awssdk.awscore.retry.AwsRetryStrategy
 
 import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, Retries}
 
@@ -61,9 +63,19 @@ private[kinesis] object KinesisSink {
   private def mkProducer[F[_]: Sync](config: KinesisSinkConfig, client: SdkAsyncHttpClient): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].delay {
+        val retryStrategy = AwsRetryStrategy
+          .standardRetryStrategy()
+          .toBuilder
+          .maxAttempts(config.maxRetries)
+          .build()
+        val overrideConfig = ClientOverrideConfiguration
+          .builder()
+          .retryStrategy(retryStrategy)
+          .build()
         val builder = KinesisAsyncClient.builder
           .httpClient(client)
           .defaultsMode(DefaultsMode.AUTO)
+          .overrideConfiguration(overrideConfig)
         config.customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build()
       }
