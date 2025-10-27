@@ -70,7 +70,10 @@ private[kinesis] object KinesisSink {
         val builder = KinesisAsyncClient.builder
           .httpClient(client)
           .defaultsMode(DefaultsMode.AUTO)
-          .overrideConfiguration(_.retryStrategy(retryStrategy): Unit)
+          .overrideConfiguration { c =>
+            c.retryStrategy(retryStrategy)
+            ()
+          }
         config.customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build()
       }
