@@ -16,7 +16,6 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.syntax.all._
 
 import software.amazon.awssdk.core.SdkBytes
-import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
@@ -71,7 +70,7 @@ private[kinesis] object KinesisSink {
         val builder = KinesisAsyncClient.builder
           .httpClient(client)
           .defaultsMode(DefaultsMode.AUTO)
-          .overrideConfiguration(c => c.retryStrategy(retryStrategy).build)
+          .overrideConfiguration(_.retryStrategy(retryStrategy): Unit)
         config.customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build()
       }
