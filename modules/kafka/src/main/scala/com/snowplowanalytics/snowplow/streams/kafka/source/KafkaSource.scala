@@ -8,7 +8,7 @@
 package com.snowplowanalytics.snowplow.streams.kafka.source
 
 import cats.Applicative
-import cats.effect.{Async, Deferred, Resource, Sync}
+import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
 import cats.kernel.Semigroup
 import fs2.Stream
@@ -35,60 +35,51 @@ private[kafka] object KafkaSource {
   def build[F[_]: Async](
     config: KafkaSourceConfig,
     authHandlerClass: String
-  ): F[SourceAndAck[F]] =
-    Deferred[F, KafkaConsumer[F, Array[Byte], ByteBuffer]].flatMap { deferred =>
-      LowLevelSource.toSourceAndAck(lowLevel(config, authHandlerClass, deferred))
-    }
+  ): Resource[F, SourceAndAck[F]] =
+    for {
+      kafkaConsumer <- KafkaConsumer.resource(consumerSettings[F](config, authHandlerClass))
+      result <- Resource.eval(LowLevelSource.toSourceAndAck(lowLevel(config, kafkaConsumer)))
+    } yield result
 
   private def lowLevel[F[_]: Async](
     config: KafkaSourceConfig,
-    authHandlerClass: String,
-    deferredConsumer: DeferredConsumer[F]
+    kafkaConsumer: KafkaConsumer[F, Array[Byte], ByteBuffer]
   ): LowLevelSource[F, KafkaCheckpoints] =
     new LowLevelSource[F, KafkaCheckpoints] {
-      def checkpointer: Checkpointer[F, KafkaCheckpoints] = kafkaCheckpointer(deferredConsumer)
+      def checkpointer: Checkpointer[F, KafkaCheckpoints] = kafkaCheckpointer(kafkaConsumer)
 
       def stream: Stream[F, Stream[F, Option[LowLevelEvents[KafkaCheckpoints]]]] =
-        kafkaStream(config, authHandlerClass, deferredConsumer)
+        kafkaStream(config, kafkaConsumer)
 
       def debounceCheckpoints: FiniteDuration = config.debounceCommitOffsets
     }
 
-  type KafkaCheckpoints               = Map[TopicPartition, OffsetAndMetadata]
-  private type DeferredConsumer[F[_]] = Deferred[F, KafkaConsumer[F, Array[Byte], ByteBuffer]]
+  type KafkaCheckpoints = Map[TopicPartition, OffsetAndMetadata]
 
   private implicit def offsetAndMetadataSemigroup: Semigroup[OffsetAndMetadata] = new Semigroup[OffsetAndMetadata] {
     def combine(x: OffsetAndMetadata, y: OffsetAndMetadata): OffsetAndMetadata =
       if (x.offset > y.offset) x else y
   }
 
-  private def kafkaCheckpointer[F[_]: Async](deferredConsumer: DeferredConsumer[F]): Checkpointer[F, KafkaCheckpoints] =
+  private def kafkaCheckpointer[F[_]: Async](kafkaConsumer: KafkaConsumer[F, Array[Byte], ByteBuffer]): Checkpointer[F, KafkaCheckpoints] =
     new Checkpointer[F, KafkaCheckpoints] {
       def combine(x: KafkaCheckpoints, y: KafkaCheckpoints): KafkaCheckpoints =
         x |+| y
 
       val empty: KafkaCheckpoints = Map.empty
       def ack(c: KafkaCheckpoints): F[Unit] =
-        deferredConsumer.get.flatMap { consumer =>
-          consumer.commitSync(c)
-        }
+        kafkaConsumer.commitSync(c)
       def nack(c: KafkaCheckpoints): F[Unit] = Applicative[F].unit
     }
 
   private def kafkaStream[F[_]: Async](
     config: KafkaSourceConfig,
-    authHandlerClass: String,
-    deferredConsumer: DeferredConsumer[F]
+    kafkaConsumer: KafkaConsumer[F, Array[Byte], ByteBuffer]
   ): Stream[F, Stream[F, Option[LowLevelEvents[KafkaCheckpoints]]]] =
-    KafkaConsumer
-      .stream(consumerSettings[F](config, authHandlerClass))
-      .evalTap(_.subscribeTo(config.topicName))
-      .evalTap(deferredConsumer.complete(_))
-      .flatMap { consumer =>
-        consumer.partitionsMapStream
-          .evalMapFilter(logWhenNoPartitions[F])
-          .map(joinPartitions[F](_))
-      }
+    Stream.eval(kafkaConsumer.subscribeTo(config.topicName)) >>
+      kafkaConsumer.partitionsMapStream
+        .evalMapFilter(logWhenNoPartitions[F])
+        .map(joinPartitions[F](_))
 
   private type PartitionedStreams[F[_]] = Map[TopicPartition, Stream[F, CommittableConsumerRecord[F, Array[Byte], ByteBuffer]]]
 
