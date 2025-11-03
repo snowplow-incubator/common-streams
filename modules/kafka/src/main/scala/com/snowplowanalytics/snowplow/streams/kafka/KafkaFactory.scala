@@ -30,12 +30,10 @@ object KafkaFactory {
         } yield result
 
       def source(config: KafkaSourceConfig): Resource[F, SourceAndAck[F]] =
-        Resource.eval {
-          for {
-            cbHandler <- acquireCallbackHandler(callbackHandlers)
-            result <- KafkaSource.build(config, cbHandler)
-          } yield result
-        }
+        for {
+          cbHandler <- Resource.eval(acquireCallbackHandler(callbackHandlers))
+          result <- KafkaSource.build(config, cbHandler)
+        } yield result
     }
 
   private def acquireCallbackHandler[F[_]: Sync](callbackHandlers: Ref[F, List[String]]): F[String] =
