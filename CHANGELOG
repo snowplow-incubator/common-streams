@@ -1,3 +1,7 @@
+Version 0.16.0 (2025-11-10)
+--------------------------
+Make Kafka commitTimeout configurable (#140)
+
 Version 0.15.0 (2025-11-05)
 --------------------------
 Kafka Soruce change from async to sync for committing offsets (#139)
