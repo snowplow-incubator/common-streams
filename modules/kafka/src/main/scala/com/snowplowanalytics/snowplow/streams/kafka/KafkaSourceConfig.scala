@@ -24,7 +24,8 @@ case class KafkaSourceConfig(
   topicName: String,
   bootstrapServers: String,
   consumerConf: Map[String, String],
-  debounceCommitOffsets: FiniteDuration
+  debounceCommitOffsets: FiniteDuration,
+  commitTimeout: FiniteDuration
 )
 
 object KafkaSourceConfig {

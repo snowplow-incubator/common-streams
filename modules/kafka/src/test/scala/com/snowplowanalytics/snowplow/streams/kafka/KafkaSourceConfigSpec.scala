@@ -54,7 +54,8 @@ class KafkaSourceConfigSpec extends Specification {
         "sasl.mechanism" -> "OAUTHBEARER",
         "sasl.jaas.config" -> "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"
       ),
-      debounceCommitOffsets = 10.seconds
+      debounceCommitOffsets = 10.seconds,
+      commitTimeout         = 15.seconds
     )
 
     result.as[Wrapper] must beRight.like { case w: Wrapper =>

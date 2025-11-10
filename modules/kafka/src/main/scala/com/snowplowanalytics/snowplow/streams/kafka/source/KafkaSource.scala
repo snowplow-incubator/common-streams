@@ -144,4 +144,5 @@ private[kafka] object KafkaSource {
       .withBootstrapServers(config.bootstrapServers)
       .withProperties(config.consumerConf)
       .withEnableAutoCommit(false)
+      .withCommitTimeout(config.commitTimeout)
 }
