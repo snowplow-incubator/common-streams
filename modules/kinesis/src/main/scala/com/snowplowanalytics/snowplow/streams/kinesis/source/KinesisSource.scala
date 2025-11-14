@@ -17,7 +17,7 @@ import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.kinesis.lifecycle.events.{ProcessRecordsInput, ShardEndedInput}
 import software.amazon.kinesis.retrieval.kpl.ExtendedSequenceNumber
 
-import java.util.concurrent.{CountDownLatch, SynchronousQueue}
+import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._
 
@@ -46,15 +46,12 @@ private[kinesis] object KinesisSource {
       }
     }
 
-  // We enable fairness on the `SynchronousQueue` to ensure all Kinesis shards are sourced at an equal rate.
-  private val synchronousQueueFairness: Boolean = true
-
   private def kinesisStream[F[_]: Async](
     config: KinesisSourceConfig,
     client: SdkAsyncHttpClient,
     awsUserAgent: Option[String]
   ): Stream[F, Stream[F, Option[LowLevelEvents[Map[String, Checkpointable]]]]] = {
-    val actionQueue = new SynchronousQueue[KCLAction](synchronousQueueFairness)
+    val actionQueue = new LinkedBlockingQueue[KCLAction]()
     for {
       _ <- Stream.resource(KCLScheduler.populateQueue[F](config, actionQueue, client, awsUserAgent))
       events <- Stream.emit(pullFromQueueAndEmit(actionQueue).stream).repeat
@@ -62,18 +59,24 @@ private[kinesis] object KinesisSource {
   }
 
   private def pullFromQueueAndEmit[F[_]: Sync](
-    queue: SynchronousQueue[KCLAction]
+    queue: LinkedBlockingQueue[KCLAction]
   ): Pull[F, Option[LowLevelEvents[Map[String, Checkpointable]]], Unit] =
-    Pull.eval(pullFromQueue(queue)).flatMap { case PullFromQueueResult(actions, hasShardEnd) =>
+    Pull.eval(pullFromQueue(queue)).flatMap { actions =>
       val toEmit = actions.traverse {
-        case KCLAction.ProcessRecords(_, processRecordsInput) if processRecordsInput.records.asScala.isEmpty =>
-          Pull.output1(None)
-        case KCLAction.ProcessRecords(shardId, processRecordsInput) =>
-          Pull.output1(Some(provideNextChunk(shardId, processRecordsInput))).covary[F]
+        case KCLAction.ProcessRecords(_, await, processRecordsInput) if processRecordsInput.records.asScala.isEmpty =>
+          Pull.eval(Sync[F].delay(await.countDown())) >> Pull.output1(None)
+        case KCLAction.ProcessRecords(shardId, await, processRecordsInput) =>
+          Pull.eval(Sync[F].delay(await.countDown())) >> Pull.output1(Some(provideNextChunk(shardId, processRecordsInput))).covary[F]
         case KCLAction.ShardEnd(shardId, await, shardEndedInput) =>
+          // Do not call `await.countDown()` yet. It must be released later by the checkpointer.
           handleShardEnd[F](shardId, await, shardEndedInput)
-        case KCLAction.KCLError(t) =>
-          Pull.eval(Logger[F].error(t)("Exception from Kinesis source")) *> Pull.raiseError[F](t)
+        case KCLAction.KCLError(t, await) =>
+          Pull.eval(Sync[F].delay(await.countDown())) >> Pull.eval(Logger[F].error(t)("Exception from Kinesis source")) >> Pull
+            .raiseError[F](t)
+      }
+      val hasShardEnd = actions.exists {
+        case _: KCLAction.ShardEnd => true
+        case _: KCLAction          => false
       }
       if (hasShardEnd) {
         val log = Logger[F].info {
@@ -88,31 +91,21 @@ private[kinesis] object KinesisSource {
         toEmit *> pullFromQueueAndEmit(queue)
     }
 
-  private case class PullFromQueueResult(actions: NonEmptyList[KCLAction], hasShardEnd: Boolean)
-
-  private def pullFromQueue[F[_]: Sync](queue: SynchronousQueue[KCLAction]): F[PullFromQueueResult] =
-    resolveNextAction(queue)
-      .flatMap {
-        case shardEnd: KCLAction.ShardEnd =>
-          // If we reached the end of one shard, it is likely we reached the end of other shards too.
-          // Therefore pull more actions from the queue, to minimize the number of times we need to do
-          // an early close of the inner stream.
-          resolveAllActions(queue).map { more =>
-            PullFromQueueResult(NonEmptyList(shardEnd, more), hasShardEnd = true)
-          }
-        case other =>
-          PullFromQueueResult(NonEmptyList.one(other), hasShardEnd = false).pure[F]
-      }
+  private def pullFromQueue[F[_]: Sync](queue: LinkedBlockingQueue[KCLAction]): F[NonEmptyList[KCLAction]] =
+    for {
+      head <- resolveNextAction(queue)
+      tail <- resolveAllActions(queue)
+    } yield NonEmptyList(head, tail)
 
   /** Always returns a `KCLAction`, possibly waiting until one is available */
-  private def resolveNextAction[F[_]: Sync](queue: SynchronousQueue[KCLAction]): F[KCLAction] =
+  private def resolveNextAction[F[_]: Sync](queue: LinkedBlockingQueue[KCLAction]): F[KCLAction] =
     Sync[F].delay(Option[KCLAction](queue.poll)).flatMap {
       case Some(action) => Sync[F].pure(action)
       case None         => Sync[F].interruptible(queue.take)
     }
 
   /** Returns immediately, but the `List[KCLAction]` might be empty */
-  private def resolveAllActions[F[_]: Sync](queue: SynchronousQueue[KCLAction]): F[List[KCLAction]] =
+  private def resolveAllActions[F[_]: Sync](queue: LinkedBlockingQueue[KCLAction]): F[List[KCLAction]] =
     for {
       ret <- Sync[F].delay(new java.util.ArrayList[KCLAction]())
       _ <- Sync[F].delay(queue.drainTo(ret))
