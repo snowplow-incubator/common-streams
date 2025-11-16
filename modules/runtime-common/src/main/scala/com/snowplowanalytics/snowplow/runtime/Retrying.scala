@@ -11,7 +11,7 @@
 package com.snowplowanalytics.snowplow.runtime
 
 import cats.{Applicative, Show}
-import cats.effect.Sync
+import cats.effect.{Ref, Sync}
 import cats.implicits._
 import retry._
 import io.circe.Decoder
@@ -58,19 +58,25 @@ object Retrying {
     toAlert: SetupExceptionMessages => Alert,
     setupErrorCheck: PartialFunction[Throwable, String]
   )(
-    action: F[A]
+    action: Int => F[A]
   ): F[A] =
-    action
-      .retryingOnSomeErrors(
-        isWorthRetrying = checkingNestedExceptions(setupErrorCheck, _).nonEmpty.pure[F],
-        policy          = policyForSetupErrors[F](configForSetup),
-        onError         = logErrorAndSendAlert(appHealth, setupErrorCheck, toAlert, _, _)
-      )
-      .retryingOnAllErrors(
-        policy  = policyForTransientErrors[F](configForTransient),
-        onError = logErrorAndReportUnhealthy(appHealth, service, _, _)
-      )
-      .productL(appHealth.beHealthyForRuntimeService(service))
+    Ref[F].of(0).flatMap { attemptRef =>
+      (for {
+        attempt <- attemptRef.get
+        result <- action(attempt)
+      } yield result)
+        .retryingOnSomeErrors(
+          isWorthRetrying = checkingNestedExceptions(setupErrorCheck, _).nonEmpty.pure[F],
+          policy          = policyForSetupErrors[F](configForSetup),
+          onError =
+            (error, details) => attemptRef.update(_ + 1) *> logErrorAndSendAlert(appHealth, setupErrorCheck, toAlert, error, details)
+        )
+        .retryingOnAllErrors(
+          policy  = policyForTransientErrors[F](configForTransient),
+          onError = (error, details) => attemptRef.update(_ + 1) *> logErrorAndReportUnhealthy(appHealth, service, error, details)
+        )
+        .productL(appHealth.beHealthyForRuntimeService(service))
+    }
 
   private def policyForSetupErrors[F[_]: Applicative](config: Config.ForSetup): RetryPolicy[F] =
     RetryPolicies.exponentialBackoff[F](config.delay)
