@@ -33,7 +33,7 @@ private object KCLAction {
    * The action emitted by the ShardRecordProcessor when it reaches a shard end.
    *
    * @param await
-   *   A countdown latch used to block the ShardRecordProcessor until all records from this stream
+   *   A countdown latch used to block the ShardRecordProcessor until all records from this shard
    *   have been checkpointed.
    *
    * @note
