@@ -16,13 +16,13 @@ import software.amazon.kinesis.lifecycle.events.{
 }
 import software.amazon.kinesis.processor.{ShardRecordProcessor => KCLShardProcessor}
 
-import java.util.concurrent.{CountDownLatch, SynchronousQueue}
+import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicReference
 
 private[source] object ShardRecordProcessor {
 
   def apply(
-    queue: SynchronousQueue[KCLAction],
+    queue: LinkedBlockingQueue[KCLAction],
     currentShardIds: AtomicReference[Set[String]]
   ): KCLShardProcessor = new KCLShardProcessor {
     private var shardId: String = _
@@ -36,9 +36,15 @@ private[source] object ShardRecordProcessor {
         //   2. KCL re-aquires the lost lease for the same shard
         //   3. The original ShardRecordProcessor is not terminated until after KCL re-aquires the lease
         // This is a very unhealthy state, so we should kill the app.
-        val action = KCLAction.KCLError(new RuntimeException(s"Refusing to initialize a duplicate record processor for shard $shardId"))
+        val countDownLatch = new CountDownLatch(1)
+        val action = KCLAction.KCLError(
+          new RuntimeException(s"Refusing to initialize a duplicate record processor for shard $shardId"),
+          countDownLatch
+        )
         withHandledInterrupts {
           queue.put(action)
+          countDownLatch.await()
+          ()
         }
       }
     }
@@ -54,9 +60,12 @@ private[source] object ShardRecordProcessor {
     }
 
     override def processRecords(processRecordsInput: ProcessRecordsInput): Unit = {
-      val action = KCLAction.ProcessRecords(shardId, processRecordsInput)
+      val countDownLatch = new CountDownLatch(1)
+      val action         = KCLAction.ProcessRecords(shardId, countDownLatch, processRecordsInput)
       withHandledInterrupts {
         queue.put(action)
+        countDownLatch.await()
+        ()
       }
     }
 

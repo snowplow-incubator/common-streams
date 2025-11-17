@@ -25,7 +25,7 @@ import software.amazon.kinesis.retrieval.polling.PollingConfig
 
 import java.net.URI
 import java.util.Date
-import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicReference
 
 import com.snowplowanalytics.snowplow.streams.kinesis.KinesisSourceConfig
@@ -34,7 +34,7 @@ private[source] object KCLScheduler {
 
   def populateQueue[F[_]: Async](
     config: KinesisSourceConfig,
-    queue: SynchronousQueue[KCLAction],
+    queue: LinkedBlockingQueue[KCLAction],
     client: SdkAsyncHttpClient,
     awsUserAgent: Option[String]
   ): Resource[F, Unit] =
@@ -51,7 +51,7 @@ private[source] object KCLScheduler {
     dynamoDbClient: DynamoDbAsyncClient,
     cloudWatchClient: CloudWatchAsyncClient,
     kinesisConfig: KinesisSourceConfig,
-    queue: SynchronousQueue[KCLAction]
+    queue: LinkedBlockingQueue[KCLAction]
   ): F[Scheduler] =
     Sync[F].delay {
       val configsBuilder =
@@ -92,8 +92,12 @@ private[source] object KCLScheduler {
       val coordinatorConfig = configsBuilder.coordinatorConfig
         .workerStateChangeListener(new WorkerStateChangeListener {
           def onWorkerStateChange(newState: WorkerStateChangeListener.WorkerState): Unit = ()
-          override def onAllInitializationAttemptsFailed(e: Throwable): Unit =
-            queue.put(KCLAction.KCLError(e))
+          override def onAllInitializationAttemptsFailed(e: Throwable): Unit = {
+            val countDownLatch = new CountDownLatch(1)
+            queue.put(KCLAction.KCLError(e, countDownLatch))
+            countDownLatch.await()
+            ()
+          }
         })
 
       new Scheduler(
