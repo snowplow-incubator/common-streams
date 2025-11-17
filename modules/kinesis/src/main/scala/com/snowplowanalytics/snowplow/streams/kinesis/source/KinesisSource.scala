@@ -29,11 +29,15 @@ private[kinesis] object KinesisSource {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  def build[F[_]: Async](config: KinesisSourceConfig, client: SdkAsyncHttpClient): F[SourceAndAck[F]] =
+  def build[F[_]: Async](
+    config: KinesisSourceConfig,
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): F[SourceAndAck[F]] =
     LowLevelSource.toSourceAndAck {
       new LowLevelSource[F, Map[String, Checkpointable]] {
         def stream: Stream[F, Stream[F, Option[LowLevelEvents[Map[String, Checkpointable]]]]] =
-          kinesisStream(config, client)
+          kinesisStream(config, client, awsUserAgent)
 
         def checkpointer: KinesisCheckpointer[F] =
           new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
@@ -47,11 +51,12 @@ private[kinesis] object KinesisSource {
 
   private def kinesisStream[F[_]: Async](
     config: KinesisSourceConfig,
-    client: SdkAsyncHttpClient
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
   ): Stream[F, Stream[F, Option[LowLevelEvents[Map[String, Checkpointable]]]]] = {
     val actionQueue = new SynchronousQueue[KCLAction](synchronousQueueFairness)
     for {
-      _ <- Stream.resource(KCLScheduler.populateQueue[F](config, actionQueue, client))
+      _ <- Stream.resource(KCLScheduler.populateQueue[F](config, actionQueue, client, awsUserAgent))
       events <- Stream.emit(pullFromQueueAndEmit(actionQueue).stream).repeat
     } yield events
   }

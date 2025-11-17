@@ -11,6 +11,7 @@ import cats.effect.implicits._
 import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
+import software.amazon.awssdk.core.client.config.SdkAdvancedClientOption
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
@@ -34,12 +35,13 @@ private[source] object KCLScheduler {
   def populateQueue[F[_]: Async](
     config: KinesisSourceConfig,
     queue: SynchronousQueue[KCLAction],
-    client: SdkAsyncHttpClient
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
   ): Resource[F, Unit] =
     for {
-      kinesis <- mkKinesisClient[F](config.customEndpoint, client)
-      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, client)
-      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, client)
+      kinesis <- mkKinesisClient[F](config.customEndpoint, client, awsUserAgent)
+      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, client, awsUserAgent)
+      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, client, awsUserAgent)
       scheduler <- Resource.eval(mkScheduler(kinesis, dynamo, cloudWatch, config, queue))
       _ <- runInBackground(scheduler)
     } yield ()
@@ -117,37 +119,67 @@ private[source] object KCLScheduler {
         InitialPositionInStreamExtended.newInitialPositionAtTimestamp(Date.from(instant))
     }
 
-  private def mkKinesisClient[F[_]: Sync](customEndpoint: Option[URI], client: SdkAsyncHttpClient): Resource[F, KinesisAsyncClient] =
+  private def mkKinesisClient[F[_]: Sync](
+    customEndpoint: Option[URI],
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
         val builder = KinesisAsyncClient
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
+        awsUserAgent.foreach { ua =>
+          builder.overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+            ()
+          }
+        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build()
       }
     }
 
-  private def mkDynamoDbClient[F[_]: Sync](customEndpoint: Option[URI], client: SdkAsyncHttpClient): Resource[F, DynamoDbAsyncClient] =
+  private def mkDynamoDbClient[F[_]: Sync](
+    customEndpoint: Option[URI],
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): Resource[F, DynamoDbAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
         val builder = DynamoDbAsyncClient
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
+        awsUserAgent.foreach { ua =>
+          builder.overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+            ()
+          }
+        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build
       }
     }
 
-  private def mkCloudWatchClient[F[_]: Sync](customEndpoint: Option[URI], client: SdkAsyncHttpClient): Resource[F, CloudWatchAsyncClient] =
+  private def mkCloudWatchClient[F[_]: Sync](
+    customEndpoint: Option[URI],
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): Resource[F, CloudWatchAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
         val builder = CloudWatchAsyncClient
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
+        awsUserAgent.foreach { ua =>
+          builder.overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+            ()
+          }
+        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build
       }

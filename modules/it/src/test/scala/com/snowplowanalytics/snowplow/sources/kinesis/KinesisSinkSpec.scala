@@ -20,7 +20,7 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.regions.Region
 
 import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
-import com.snowplowanalytics.snowplow.streams.kinesis.KinesisFactory
+import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisFactoryConfig}
 
 import Utils._
 import org.specs2.specification.BeforeAll
@@ -39,7 +39,7 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSinkSpec.getClass.getSimpleName)
-      testFactory <- KinesisFactory.resource[IO]
+      testFactory <- KinesisFactory.resource[IO](KinesisFactoryConfig(awsUserAgent = None))
       testSink <- testFactory.sink(getKinesisSinkConfig(localstack.getEndpoint)(testStream1Name))
     } yield (region, localstack, testSink)
 

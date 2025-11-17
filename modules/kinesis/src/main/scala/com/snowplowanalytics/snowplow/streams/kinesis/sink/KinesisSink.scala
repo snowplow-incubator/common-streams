@@ -16,6 +16,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.syntax.all._
 
 import software.amazon.awssdk.core.SdkBytes
+import software.amazon.awssdk.core.client.config.SdkAdvancedClientOption
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
@@ -40,8 +41,12 @@ import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
 
 private[kinesis] object KinesisSink {
 
-  def resource[F[_]: Async](config: KinesisSinkConfig, client: SdkAsyncHttpClient): Resource[F, Sink[F]] =
-    mkProducer[F](config, client).map { p =>
+  def resource[F[_]: Async](
+    config: KinesisSinkConfig,
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): Resource[F, Sink[F]] =
+    mkProducer[F](config, client, awsUserAgent).map { p =>
       new Sink[F] {
         def sink(batch: ListOfList[Sinkable]): F[Unit] =
           writeToKinesis[F](
@@ -59,7 +64,11 @@ private[kinesis] object KinesisSink {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  private def mkProducer[F[_]: Sync](config: KinesisSinkConfig, client: SdkAsyncHttpClient): Resource[F, KinesisAsyncClient] =
+  private def mkProducer[F[_]: Sync](
+    config: KinesisSinkConfig,
+    client: SdkAsyncHttpClient,
+    awsUserAgent: Option[String]
+  ): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].delay {
         val retryStrategy = AwsRetryStrategy
@@ -72,6 +81,7 @@ private[kinesis] object KinesisSink {
           .defaultsMode(DefaultsMode.AUTO)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
+            awsUserAgent.foreach(ua => c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua))
             ()
           }
         config.customEndpoint.foreach(uri => builder.endpointOverride(uri))
