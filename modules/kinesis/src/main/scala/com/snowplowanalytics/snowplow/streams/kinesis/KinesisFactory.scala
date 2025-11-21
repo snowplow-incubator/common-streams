@@ -16,21 +16,20 @@ import com.snowplowanalytics.snowplow.streams.kinesis.sink.KinesisSink
 import com.snowplowanalytics.snowplow.streams.kinesis.source.KinesisSource
 
 class KinesisFactory[F[_]: Async] private (
-  client: SdkAsyncHttpClient,
-  awsUserAgent: Option[String]
+  client: SdkAsyncHttpClient
 ) extends Factory[F, KinesisSourceConfig, KinesisSinkConfig] {
 
   def sink(config: KinesisSinkConfig): Resource[F, Sink[F]] =
-    KinesisSink.resource(config, client, awsUserAgent)
+    KinesisSink.resource(config, client)
 
   def source(config: KinesisSourceConfig): Resource[F, SourceAndAck[F]] =
-    Resource.eval(KinesisSource.build(config, client, awsUserAgent))
+    Resource.eval(KinesisSource.build(config, client))
 }
 
 object KinesisFactory {
 
-  def resource[F[_]: Async](config: KinesisFactoryConfig): Resource[F, KinesisFactory[F]] =
-    makeClient[F].map(new KinesisFactory(_, config.awsUserAgent))
+  def resource[F[_]: Async]: Resource[F, KinesisFactory[F]] =
+    makeClient[F].map(new KinesisFactory(_))
 
   def makeClient[F[_]: Sync]: Resource[F, SdkAsyncHttpClient] =
     Resource.fromAutoCloseable {

@@ -30,7 +30,7 @@ import software.amazon.awssdk.services.kinesis.model.{
 }
 import software.amazon.awssdk.awscore.retry.AwsRetryStrategy
 
-import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, Retries}
+import com.snowplowanalytics.snowplow.streams.kinesis.{AWS_USER_AGENT, BackoffPolicy, KinesisSinkConfig, Retries}
 
 import java.util.UUID
 import java.nio.charset.StandardCharsets.UTF_8
@@ -43,10 +43,9 @@ private[kinesis] object KinesisSink {
 
   def resource[F[_]: Async](
     config: KinesisSinkConfig,
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, Sink[F]] =
-    mkProducer[F](config, client, awsUserAgent).map { p =>
+    mkProducer[F](config, client).map { p =>
       new Sink[F] {
         def sink(batch: ListOfList[Sinkable]): F[Unit] =
           writeToKinesis[F](
@@ -66,8 +65,7 @@ private[kinesis] object KinesisSink {
 
   private def mkProducer[F[_]: Sync](
     config: KinesisSinkConfig,
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].delay {
@@ -81,7 +79,7 @@ private[kinesis] object KinesisSink {
           .defaultsMode(DefaultsMode.AUTO)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
-            awsUserAgent.foreach(ua => c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua))
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
         config.customEndpoint.foreach(uri => builder.endpointOverride(uri))

@@ -28,20 +28,19 @@ import java.util.Date
 import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicReference
 
-import com.snowplowanalytics.snowplow.streams.kinesis.KinesisSourceConfig
+import com.snowplowanalytics.snowplow.streams.kinesis.{AWS_USER_AGENT, KinesisSourceConfig}
 
 private[source] object KCLScheduler {
 
   def populateQueue[F[_]: Async](
     config: KinesisSourceConfig,
     queue: LinkedBlockingQueue[KCLAction],
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, Unit] =
     for {
-      kinesis <- mkKinesisClient[F](config.customEndpoint, client, awsUserAgent)
-      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, client, awsUserAgent)
-      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, client, awsUserAgent)
+      kinesis <- mkKinesisClient[F](config.customEndpoint, client)
+      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, client)
+      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, client)
       scheduler <- Resource.eval(mkScheduler(kinesis, dynamo, cloudWatch, config, queue))
       _ <- runInBackground(scheduler)
     } yield ()
@@ -125,8 +124,7 @@ private[source] object KCLScheduler {
 
   private def mkKinesisClient[F[_]: Sync](
     customEndpoint: Option[URI],
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
@@ -134,12 +132,10 @@ private[source] object KCLScheduler {
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
-        awsUserAgent.foreach { ua =>
-          builder.overrideConfiguration { c =>
-            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+          .overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
-        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build()
       }
@@ -147,8 +143,7 @@ private[source] object KCLScheduler {
 
   private def mkDynamoDbClient[F[_]: Sync](
     customEndpoint: Option[URI],
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, DynamoDbAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
@@ -156,12 +151,10 @@ private[source] object KCLScheduler {
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
-        awsUserAgent.foreach { ua =>
-          builder.overrideConfiguration { c =>
-            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+          .overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
-        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build
       }
@@ -169,8 +162,7 @@ private[source] object KCLScheduler {
 
   private def mkCloudWatchClient[F[_]: Sync](
     customEndpoint: Option[URI],
-    client: SdkAsyncHttpClient,
-    awsUserAgent: Option[String]
+    client: SdkAsyncHttpClient
   ): Resource[F, CloudWatchAsyncClient] =
     Resource.fromAutoCloseable {
       Sync[F].blocking { // Blocking because this might dial the EC2 metadata endpoint
@@ -178,12 +170,10 @@ private[source] object KCLScheduler {
           .builder()
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
-        awsUserAgent.foreach { ua =>
-          builder.overrideConfiguration { c =>
-            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_SUFFIX, ua)
+          .overrideConfiguration { c =>
+            c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
-        }
         customEndpoint.foreach(uri => builder.endpointOverride(uri))
         builder.build
       }
