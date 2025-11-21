@@ -28,7 +28,7 @@ Licensed under the [Snowplow Community License](https://docs.snowplow.io/communi
 [build-image]: https://github.com/snowplow-incubator/common-streams/workflows/CI/badge.svg
 [build]: https://github.com/snowplow-incubator/common-streams/actions/workflows/ci.yml
 
-[release-image]: https://img.shields.io/badge/release-0.17.0-blue.svg?style=flat
+[release-image]: https://img.shields.io/badge/release-0.18.0-blue.svg?style=flat
 [releases]: https://github.com/snowplow-incubator/common-streams/releases
 
 [license]: https://docs.snowplow.io/docs/contributing/community-license-faq/

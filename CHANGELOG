@@ -1,3 +1,7 @@
+Version 0.18.0 (2025-11-21)
+--------------------------
+Use hard-coded AWS user-agent (#146)
+
 Version 0.17.0 (2025-11-17)
 --------------------------
 Add AWS user-agent (#144)

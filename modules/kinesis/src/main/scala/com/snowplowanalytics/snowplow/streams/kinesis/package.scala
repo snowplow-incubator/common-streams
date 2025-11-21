@@ -10,5 +10,7 @@ package com.snowplowanalytics.snowplow.streams
 import cats.Id
 
 package object kinesis {
+  val AWS_USER_AGENT = "APN/1.1 (ak035lu2m8ge2f9qx90duo3ww)"
+
   type KinesisSinkConfig = KinesisSinkConfigM[Id]
 }

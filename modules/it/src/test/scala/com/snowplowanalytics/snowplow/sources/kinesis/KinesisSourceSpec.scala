@@ -22,7 +22,7 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.streams.EventProcessingConfig
 import com.snowplowanalytics.snowplow.streams.EventProcessingConfig.NoWindowing
-import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisFactoryConfig, KinesisSourceConfig}
+import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisSourceConfig}
 
 import Utils._
 
@@ -46,7 +46,7 @@ class KinesisSourceSpec
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)
       kinesisClient <- Resource.eval(getKinesisClient(localstack.getEndpoint, region))
-      kinesisFactory <- KinesisFactory.resource[IO](KinesisFactoryConfig(awsUserAgent = None))
+      kinesisFactory <- KinesisFactory.resource[IO]
     } yield (localstack, kinesisClient, getKinesisSourceConfig(localstack.getEndpoint)(_), kinesisFactory)
 
   override def is = s2"""
