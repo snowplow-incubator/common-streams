@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.streams.kinesis.sink
 
 import cats.implicits._
+import cats.Monoid
 import cats.effect.implicits._
 import cats.effect.{Async, Ref, Resource, Sync}
 
@@ -133,61 +134,64 @@ private[kinesis] object KinesisSink {
    * The result of trying to write a batch to kinesis
    * @param nextBatchAttempt
    *   Records to re-package into another batch, either because of throttling or an internal error
-   * @param hadNonThrottleErrors
-   *   Whether at least one of failures is not because of throttling
-   * @param exampleInternalError
-   *   A message to help with logging
+   * @param errorCodes
+   *   All error codes across all records in the batch. AWS documents two possible values:
+   *   ProvisionedThroughputExceededException or InternalFailure
    */
   private case class TryBatchResult(
     nextBatchAttempt: List[PutRecordsRequestEntry],
-    hadNonThrottleErrors: Boolean,
-    exampleInternalError: Option[String]
+    errorCodes: Set[String]
   )
 
   private object TryBatchResult {
 
+    private val success: TryBatchResult = TryBatchResult(Nil, Set.empty)
+
+    implicit def tryBatchResultMonoid: Monoid[TryBatchResult] = new Monoid[TryBatchResult] {
+      def empty: TryBatchResult = success
+      def combine(a: TryBatchResult, b: TryBatchResult) =
+        TryBatchResult(
+          nextBatchAttempt = a.nextBatchAttempt ::: b.nextBatchAttempt,
+          errorCodes       = a.errorCodes ++ b.errorCodes
+        )
+    }
+
     /**
      * The build method creates a TryBatchResult, which:
      *
-     *   - Returns an empty list and false for hadNonThrottleErrors if everything was successful
-     *   - Returns the list of failed requests and true for hadNonThrottleErrors if we encountered
-     *     any errors that weren't throttles
-     *   - Returns the list of failed requests and false for hadNonThrottleErrors if we encountered
-     *     only throttling
+     *   - Returns an empty list if everything was successful
+     *   - Returns the list of failed requests if there are any results with an error code
      */
     def build(records: List[PutRecordsRequestEntry], prr: PutRecordsResponse): TryBatchResult =
-      if (prr.failedRecordCount().toInt =!= 0)
+      if (prr.failedRecordCount().toInt =!= 0) {
         records
           .zip(prr.records().asScala)
-          .foldLeft(TryBatchResult(Nil, false, None)) { case (acc, (orig, recordResult)) =>
+          .foldLeft(success) { case (acc, (orig, recordResult)) =>
             Option(recordResult.errorCode()) match {
               // If the record had no error, treat as success
               case None => acc
-              // If it had a throughput exception, mark that and provide the original
-              case Some("ProvisionedThroughputExceededException") =>
-                acc.copy(nextBatchAttempt = orig :: acc.nextBatchAttempt)
-              // If any other error, mark success and throttled false for this record, and provide the original
-              case Some(_) =>
-                TryBatchResult(orig :: acc.nextBatchAttempt, true, acc.exampleInternalError.orElse(Option(recordResult.errorMessage())))
-
+              // If it had any error code, treat as needing retry
+              case Some(errorCode) =>
+                acc.copy(
+                  nextBatchAttempt = orig :: acc.nextBatchAttempt,
+                  errorCodes       = acc.errorCodes + errorCode
+                )
             }
           }
-      else
-        TryBatchResult(Nil, false, None)
+      } else success
   }
 
   /**
-   * Try writing a batch, and returns a list of the failures to be retried:
+   * Try writing a batch
    *
-   * If we are not throttled by kinesis, then the list is empty. If we are throttled by kinesis, the
-   * list contains throttled records and records that gave internal errors. If there is an
-   * exception, or if all records give internal errors, then we retry using the policy.
+   * Returns a result describing records that must be retried and any error codes encountered for
+   * this batch
    */
   private def tryWriteToKinesis[F[_]: Async](
     streamName: String,
     kinesis: KinesisAsyncClient,
     records: List[PutRecordsRequestEntry]
-  ): F[List[PutRecordsRequestEntry]] =
+  ): F[TryBatchResult] =
     Logger[F].debug(s"Writing ${records.size} records to ${streamName}") *>
       Async[F]
         .fromCompletableFuture {
@@ -203,14 +207,6 @@ private[kinesis] object KinesisSink {
           }
         }
         .map(TryBatchResult.build(records, _))
-        .flatMap { result =>
-          // If we encountered non-throttle errors, raise an exception. Otherwise, return all the requests that should
-          // be manually retried due to throttling
-          if (result.hadNonThrottleErrors)
-            Sync[F].raiseError(new RuntimeException(failureMessageForInternalErrors(records, streamName, result)))
-          else
-            result.nextBatchAttempt.pure[F]
-        }
 
   private def writeToKinesis[F[_]: Async](
     throttlingErrorsPolicy: BackoffPolicy,
@@ -219,33 +215,33 @@ private[kinesis] object KinesisSink {
     streamName: String,
     records: ListOfList[Sinkable]
   ): F[Unit] = {
-    val policyForThrottling = Retries.forThrottling[F](throttlingErrorsPolicy)
+    val policyForThrottlingAndInternalErrors = Retries.forThrottling[F](throttlingErrorsPolicy)
 
     // First, tryWriteToKinesis - the AWS SDK will handle retries. If there are still failures after that, it will:
     // - return messages for retries if we only hit throttliing
     // - raise an error if we still have non-throttle failures after the SDK has carried out retries
-    def runAndCaptureFailures(ref: Ref[F, ListOfList[PutRecordsRequestEntry]]): F[ListOfList[PutRecordsRequestEntry]] =
+    def runAndCaptureFailures(ref: Ref[F, ListOfList[PutRecordsRequestEntry]]): F[TryBatchResult] =
       for {
         records <- ref.get
-        failures <- records
-                      .group(requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
-                      .parTraverse(g => tryWriteToKinesis(streamName, kinesis, g))
-        listOfList = ListOfList.of(failures)
-        _ <- ref.set(listOfList)
-      } yield listOfList
+        result <- records
+                    .group(requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
+                    .parTraverse(g => tryWriteToKinesis(streamName, kinesis, g))
+                    .map(_.combineAll)
+        _ <- ref.set(ListOfList.ofLists(result.nextBatchAttempt))
+      } yield result
     for {
       ref <- Ref.of[F, ListOfList[PutRecordsRequestEntry]](toKinesisRecords(records))
-      failures <- runAndCaptureFailures(ref)
-                    .retryingOnFailures(
-                      policy        = policyForThrottling,
-                      wasSuccessful = entries => Sync[F].pure(entries.isEmpty),
-                      onFailure = { case (result, retryDetails) =>
-                        val msg = failureMessageForThrottling(result, streamName)
-                        Logger[F].warn(s"$msg (${retryDetails.retriesSoFar} retries from cats-retry)")
-                      }
-                    )
-      _ <- if (failures.isEmpty) Sync[F].unit
-           else Sync[F].raiseError(new RuntimeException(failureMessageForThrottling(failures, streamName)))
+      result <- runAndCaptureFailures(ref)
+                  .retryingOnFailures(
+                    policy        = policyForThrottlingAndInternalErrors,
+                    wasSuccessful = result => Sync[F].pure(result.nextBatchAttempt.isEmpty),
+                    onFailure = { case (result, retryDetails) =>
+                      val msg = failureMessageForThrottling(result, streamName)
+                      Logger[F].warn(s"$msg (${retryDetails.retriesSoFar} retries so far)")
+                    }
+                  )
+      _ <- if (result.nextBatchAttempt.isEmpty) Sync[F].unit
+           else Sync[F].raiseError(new RuntimeException(failureMessageForThrottling(result, streamName)))
     } yield ()
   }
 
@@ -254,18 +250,11 @@ private[kinesis] object KinesisSink {
   private def getRecordSize(record: PutRecordsRequestEntry) =
     record.data.asByteArrayUnsafe().length + record.partitionKey().getBytes(UTF_8).length
 
-  private def failureMessageForInternalErrors(
-    records: List[PutRecordsRequestEntry],
-    streamName: String,
-    result: TryBatchResult
-  ): String = {
-    val exampleMessage = result.exampleInternalError.getOrElse("none")
-    s"Writing ${records.size} records to $streamName errored with internal failures. Example error message [$exampleMessage]"
-  }
-
   private def failureMessageForThrottling(
-    records: ListOfList[PutRecordsRequestEntry],
+    result: TryBatchResult,
     streamName: String
-  ): String =
-    s"Exceeded Kinesis provisioned throughput: ${records.size} records failed writing to $streamName."
+  ): String = {
+    val errorCodes = result.errorCodes.mkString(",")
+    s"Kinesis error codes [$errorCodes] on writing ${result.nextBatchAttempt.size} records to $streamName."
+  }
 }
