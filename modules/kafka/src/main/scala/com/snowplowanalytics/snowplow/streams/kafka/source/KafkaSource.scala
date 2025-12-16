@@ -22,6 +22,7 @@ import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import fs2.kafka._
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
+import org.apache.kafka.common.errors.RebalanceInProgressException
 
 // snowplow
 import com.snowplowanalytics.snowplow.streams.SourceAndAck
@@ -68,7 +69,9 @@ private[kafka] object KafkaSource {
 
       val empty: KafkaCheckpoints = Map.empty
       def ack(c: KafkaCheckpoints): F[Unit] =
-        kafkaConsumer.commitSync(c)
+        kafkaConsumer.commitSync(c).recoverWith { case _: RebalanceInProgressException =>
+          Logger[F].warn("Failed to commit offsets during rebalance, offsets will be lost and events may be reprocessed")
+        }
       def nack(c: KafkaCheckpoints): F[Unit] = Applicative[F].unit
     }
 
@@ -145,4 +148,5 @@ private[kafka] object KafkaSource {
       .withProperties(config.consumerConf)
       .withEnableAutoCommit(false)
       .withCommitTimeout(config.commitTimeout)
+      .withRebalanceRevokeMode(RebalanceRevokeMode.Graceful)
 }
