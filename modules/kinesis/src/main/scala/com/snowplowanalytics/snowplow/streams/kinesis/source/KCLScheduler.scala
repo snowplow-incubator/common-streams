@@ -11,8 +11,10 @@ import cats.effect.implicits._
 import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
+import software.amazon.awssdk.awscore.retry.AwsRetryStrategy
 import software.amazon.awssdk.core.client.config.SdkAdvancedClientOption
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient
+import software.amazon.awssdk.retries.api.RetryStrategy
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
@@ -36,14 +38,20 @@ private[source] object KCLScheduler {
     config: KinesisSourceConfig,
     queue: LinkedBlockingQueue[KCLAction],
     client: SdkAsyncHttpClient
-  ): Resource[F, Unit] =
+  ): Resource[F, Unit] = {
+    val retryStrategy = AwsRetryStrategy
+      .standardRetryStrategy()
+      .toBuilder
+      .maxAttempts(config.maxRetries)
+      .build()
     for {
-      kinesis <- mkKinesisClient[F](config.customEndpoint, client)
-      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, client)
-      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, client)
+      kinesis <- mkKinesisClient[F](config.customEndpoint, retryStrategy, client)
+      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, retryStrategy, client)
+      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, retryStrategy, client)
       scheduler <- Resource.eval(mkScheduler(kinesis, dynamo, cloudWatch, config, queue))
       _ <- runInBackground(scheduler)
     } yield ()
+  }
 
   private def mkScheduler[F[_]: Sync](
     kinesisClient: KinesisAsyncClient,
@@ -124,6 +132,7 @@ private[source] object KCLScheduler {
 
   private def mkKinesisClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, KinesisAsyncClient] =
     Resource.fromAutoCloseable {
@@ -133,6 +142,7 @@ private[source] object KCLScheduler {
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
           .overrideConfiguration { c =>
+            c.retryStrategy(retryStrategy)
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
@@ -143,6 +153,7 @@ private[source] object KCLScheduler {
 
   private def mkDynamoDbClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, DynamoDbAsyncClient] =
     Resource.fromAutoCloseable {
@@ -152,6 +163,7 @@ private[source] object KCLScheduler {
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
           .overrideConfiguration { c =>
+            c.retryStrategy(retryStrategy)
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
@@ -162,6 +174,7 @@ private[source] object KCLScheduler {
 
   private def mkCloudWatchClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, CloudWatchAsyncClient] =
     Resource.fromAutoCloseable {
@@ -171,6 +184,7 @@ private[source] object KCLScheduler {
           .defaultsMode(DefaultsMode.AUTO)
           .httpClient(client)
           .overrideConfiguration { c =>
+            c.retryStrategy(retryStrategy)
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
