@@ -51,7 +51,8 @@ case class KinesisSourceConfig(
   leaseDuration: FiniteDuration,
   maxLeasesToStealAtOneTimeFactor: BigDecimal,
   checkpointThrottledBackoffPolicy: BackoffPolicy,
-  debounceCheckpoints: FiniteDuration
+  debounceCheckpoints: FiniteDuration,
+  maxRetries: Int
 )
 
 object KinesisSourceConfig {
