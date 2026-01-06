@@ -317,10 +317,10 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.ProcessorStartedWindow("1970-01-01T00:01:00Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:00Z", List("25", "26", "27", "28", "29", "30", "31", "32")),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:20Z", List("33", "34", "35", "36", "37", "38", "39", "40")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
-        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40")),
         Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("41", "42", "43", "44", "45", "46", "47", "48")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
+        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40")),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:00Z", List("49", "50", "51", "52", "53", "54", "55", "56")),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:20Z", List("57", "58", "59", "60", "61", "62", "63", "64")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:02:25Z"),
@@ -355,10 +355,10 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.ProcessorStartedWindow("1970-01-01T00:02:40Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:40Z", List("65", "66", "67", "68", "69", "70", "71", "72")),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:00Z", List("73", "74", "75", "76", "77", "78", "79", "80")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
-        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80")),
         Action.ProcessorStartedWindow("1970-01-01T00:03:20Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:20Z", List("81", "82", "83", "84", "85", "86", "87", "88")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
+        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80")),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:40Z", List("89", "90", "91", "92", "93", "94", "95", "96")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:55Z"),
         Action.Checkpointed(List("81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96"))
@@ -624,10 +624,10 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.ProcessorStartedWindow("1970-01-01T00:01:00Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:00Z", List("25", "26", "27", "28", "29", "30", "31", "32")),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:20Z", List("33", "34", "35", "36", "37", "38", "39", "40")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
-        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40")),
         Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("41", "42", "43", "44", "45", "46", "47", "48")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:40Z"),
+        Action.Checkpointed(List("25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40")),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:00Z", List("49", "50", "51", "52", "53", "54", "55", "56")),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:20Z", List("57", "58", "59", "60", "61", "62", "63", "64")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:02:25Z"),
@@ -662,10 +662,10 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.ProcessorStartedWindow("1970-01-01T00:02:40Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:02:40Z", List("65", "66", "67", "68", "69", "70", "71", "72")),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:00Z", List("73", "74", "75", "76", "77", "78", "79", "80")),
-        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
-        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80")),
         Action.ProcessorStartedWindow("1970-01-01T00:03:20Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:20Z", List("81", "82", "83", "84", "85", "86", "87", "88")),
+        Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:20Z"),
+        Action.Checkpointed(List("65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80")),
         Action.ProcessorReceivedEvents("1970-01-01T00:03:40Z", List("89", "90", "91", "92", "93", "94", "95", "96")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:03:55Z"),
         Action.Checkpointed(List("81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96"))
@@ -1058,6 +1058,7 @@ object LowLevelSourceSpec {
       val start = IO.realTimeInstant.flatMap(t => ref.update(_ :+ Action.ProcessorStartedWindow(t.toString)))
       val end = for {
         t <- IO.realTimeInstant
+        _ <- IO.sleep(1.nanos) // Forces deterministic order of Actions
         _ <- ref.update(_ :+ Action.ProcessorReachedEndOfWindow(t.toString))
         _ <- IO.sleep(config.timeToFinalizeWindow)
         tokens <- checkpoints.get
