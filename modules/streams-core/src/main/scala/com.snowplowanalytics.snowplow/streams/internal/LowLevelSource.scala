@@ -38,9 +38,11 @@ private[streams] trait LowLevelSource[F[_], C] {
   /**
    * Provides a stream of stream of low level events
    *
-   * The inner streams are processed one at a time, with clean separation before starting the next
-   * inner stream. This is required e.g. for Kafka, where the end of a stream represents client
-   * rebalancing.
+   * The inner streams are processed sequentially, though processing may be interleaved during
+   * finalization — the next inner stream can begin while the previous is still finalizing.
+   *
+   * A new inner stream is emitted when the source requires a hard boundary, e.g. for Kafka when a
+   * client rebalance occurs, or for Kinesis when a shard ends.
    *
    * A new [[EventProcessor]] will be invoked for each inner stream
    *
@@ -107,35 +109,35 @@ private[streams] object LowLevelSource {
   def toSourceAndAck[F[_]: Async, C](source: LowLevelSource[F, C]): F[SourceAndAck[F]] =
     for {
       stateRef <- Ref[F].of[InternalState](InternalState.Disconnected)
-    } yield sourceAndAckImpl(source, stateRef)
+      acksRef <- Ref[F].of(Map.empty[Unique.Token, C])
+    } yield sourceAndAckImpl(source, stateRef, acksRef)
 
   private def sourceAndAckImpl[F[_]: Async, C](
     source: LowLevelSource[F, C],
-    stateRef: Ref[F, InternalState]
+    stateRef: Ref[F, InternalState],
+    acksRef: Ref[F, Map[Unique.Token, C]]
   ): SourceAndAck[F] = new SourceAndAck[F] {
     def stream(config: EventProcessingConfig[F], processor: EventProcessor[F]): Stream[F, Nothing] = {
-      val str = for {
-        s2 <- source.stream
-        acksRef <- Stream.bracket(Ref[F].of(Map.empty[Unique.Token, C]))(nackUnhandled(source.checkpointer, _))
-        now <- Stream.eval(Sync[F].realTime)
-        _ <- Stream.bracket(stateRef.set(InternalState.AwaitingUpstream(now)))(_ => stateRef.set(InternalState.Disconnected))
-      } yield {
-        val tokenedSources = s2
-          .through(monitorLatency(config, stateRef))
-          .through(tokened(acksRef))
-          .through(windowed(config.windowing))
-
-        val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
-          CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control, source.debounceCheckpoints))
-        }
-
-        tokenedSources
-          .zip(sinks)
-          .map { case (tokenedSource, sink) => sink(tokenedSource) }
-          .parJoin(eagerness(config.windowing)) // so we start processing the next window while the previous window is still finishing up.
+      val sinks = EagerWindows.pipes { control: EagerWindows.Control[F] =>
+        CleanCancellation(messageSink(processor, acksRef, source.checkpointer, control, source.debounceCheckpoints))
       }
 
-      str.flatten
+      val tokenedSources = for {
+        s2 <- source.stream
+        now <- Stream.eval(Sync[F].realTime)
+        _ <- Stream.bracket(stateRef.set(InternalState.AwaitingUpstream(now)))(_ => stateRef.set(InternalState.Disconnected))
+      } yield s2
+        .through(monitorLatency(config, stateRef))
+        .through(tokened(acksRef))
+        .through(windowed(config.windowing))
+
+      tokenedSources.flatten
+        .zip(sinks)
+        .map { case (tokenedSource, sink) => sink(tokenedSource) }
+        .parJoin(eagerness(config.windowing)) // so we start processing the next window while the previous window is still finishing up.
+        .onFinalize {
+          nackUnhandled(source.checkpointer, acksRef)
+        }
     }
 
     def isHealthy(maxAllowedProcessingLatency: FiniteDuration): F[SourceAndAck.HealthStatus] =
