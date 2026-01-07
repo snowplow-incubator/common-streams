@@ -38,9 +38,11 @@ private[streams] trait LowLevelSource[F[_], C] {
   /**
    * Provides a stream of stream of low level events
    *
-   * The inner streams are processed one at a time, with clean separation before starting the next
-   * inner stream. This is required e.g. for Kafka, where the end of a stream represents client
-   * rebalancing.
+   * The inner streams are processed sequentially, though processing may be interleaved during
+   * finalization — the next inner stream can begin while the previous is still finalizing.
+   *
+   * A new inner stream is emitted when the source requires a hard boundary, e.g. for Kafka when a
+   * client rebalance occurs, or for Kinesis when a shard ends.
    *
    * A new [[EventProcessor]] will be invoked for each inner stream
    *
