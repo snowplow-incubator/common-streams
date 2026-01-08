@@ -12,33 +12,38 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.testing.specs2.CatsResource
 import org.specs2.mutable.SpecificationLike
-import org.specs2.specification.BeforeAll
+import org.specs2.specification.{AfterAll, BeforeAll}
 import org.testcontainers.containers.GenericContainer
-import com.snowplowanalytics.snowplow.it.DockerPull
-
 import retry.syntax.all._
 import retry.RetryPolicies
 
-class MetricsSpec extends CatsResource[IO, (GenericContainer[_], StatsdAPI[IO])] with SpecificationLike with BeforeAll {
+class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike with BeforeAll with AfterAll {
+
+  private lazy val container: GenericContainer[_] =
+    Statsd.startContainer(TestMetrics.getClass.getSimpleName)
 
   override def beforeAll(): Unit = {
-    DockerPull.pull(Statsd.image, Statsd.tag)
+    val _ = container
     super.beforeAll()
   }
 
-  override val resource: Resource[IO, (GenericContainer[_], StatsdAPI[IO])] =
+  override def afterAll(): Unit = {
+    container.stop()
+    super.afterAll()
+  }
+
+  override val resource: Resource[IO, StatsdAPI[IO]] =
     for {
-      statsd <- Statsd.resource(TestMetrics.getClass.getSimpleName)
-      socket <- Resource.eval(IO.blocking(new Socket(statsd.getHost(), statsd.getMappedPort(8126))))
+      socket <- Resource.eval(IO.blocking(new Socket(container.getHost(), container.getMappedPort(8126))))
       statsdApi <- StatsdAPI.resource[IO](socket)
-    } yield (statsd, statsdApi)
+    } yield statsdApi
 
   override def is = s2"""
   MetricsSpec should
     deliver metrics to statsd $e1
   """
 
-  def e1 = withResource { case (statsd @ _, statsdApi) =>
+  def e1 = withResource { statsdApi =>
     for {
       t <- TestMetrics.impl(300.millis)
       _ <- t.count(100)
