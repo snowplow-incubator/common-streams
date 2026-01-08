@@ -40,11 +40,11 @@ class MetricsSpec extends CatsResource[IO, (GenericContainer[_], StatsdAPI[IO])]
 
   def e1 = withResource { case (statsd @ _, statsdApi) =>
     for {
-      t <- TestMetrics.impl
+      t <- TestMetrics.impl(300.millis)
       _ <- t.count(100)
       _ <- t.time(10.seconds)
       f <- t.report.compile.drain.start
-      _ <- IO.sleep(150.millis)
+      _ <- IO.sleep(350.millis)
       counters <- statsdApi
                     .get(Metrics.MetricType.Count)
                     .retryingOnFailures(
@@ -81,7 +81,7 @@ object TestMetrics {
     def time(t: FiniteDuration) = ref.update(s => s.copy(timer = s.timer + t))
   }
 
-  def impl = Ref[IO]
+  def impl(period: FiniteDuration) = Ref[IO]
     .of(TestState.empty)
     .map { ref =>
       TestMetrics(
@@ -92,7 +92,7 @@ object TestMetrics {
             "localhost",
             8125,
             Map.empty,
-            100.millis,
+            period,
             ""
           )
         )
