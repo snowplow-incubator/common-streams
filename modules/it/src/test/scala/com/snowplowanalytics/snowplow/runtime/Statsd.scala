@@ -8,6 +8,7 @@
 package com.snowplowanalytics.snowplow.runtime
 
 import scala.jdk.CollectionConverters._
+import cats.effect.{IO, Resource}
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.output.Slf4jLogConsumer
@@ -19,7 +20,10 @@ object Statsd {
   val image = "dblworks/statsd" // the official statsd/statsd size is monstrous
   val tag   = "v0.10.1"
 
-  def startContainer(loggerName: String): GenericContainer[_] = {
+  def resource(loggerName: String): Resource[IO, GenericContainer[_]] =
+    Resource.make(IO.blocking(startContainer(loggerName)))(c => IO.blocking(c.stop()))
+
+  private def startContainer(loggerName: String): GenericContainer[_] = {
     val statsd: GenericContainer[_] = new GenericContainer(s"$image:$tag")
     statsd.addExposedPort(8126)
     statsd.setWaitStrategy(Wait.forLogMessage("""^(.*)server is up(.+)$""", 1))

@@ -12,29 +12,17 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.testing.specs2.CatsResource
 import org.specs2.mutable.SpecificationLike
-import org.specs2.specification.{AfterAll, BeforeAll}
-import org.testcontainers.containers.GenericContainer
 import retry.syntax.all._
 import retry.RetryPolicies
 
-class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike with BeforeAll with AfterAll {
+class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike {
 
-  private lazy val container: GenericContainer[_] =
-    Statsd.startContainer(TestMetrics.getClass.getSimpleName)
-
-  override def beforeAll(): Unit = {
-    val _ = container
-    super.beforeAll()
-  }
-
-  override def afterAll(): Unit = {
-    container.stop()
-    super.afterAll()
-  }
+  override protected val ResourceTimeout = 1.minute
 
   override val resource: Resource[IO, StatsdAPI[IO]] =
     for {
-      socket <- Resource.eval(IO.blocking(new Socket(container.getHost(), container.getMappedPort(8126))))
+      statsd <- Statsd.resource(TestMetrics.getClass.getSimpleName)
+      socket <- Resource.eval(IO.blocking(new Socket(statsd.getHost(), statsd.getMappedPort(8126))))
       statsdApi <- StatsdAPI.resource[IO](socket)
     } yield statsdApi
 
