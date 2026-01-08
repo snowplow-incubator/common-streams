@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -23,6 +24,42 @@ jobs:
 
       - name: Check Scala formatting
         run: sbt scalafmtSbtCheck scalafmtCheckAll
+
+      - name: Cache StatsD image
+        uses: actions/cache@v4
+        id: statsd-cache
+        with:
+          path: /tmp/docker-images/statsd.tar
+          key: docker-${{ runner.os }}-statsd-v0.10.1
+
+      - name: Load cached StatsD image
+        if: steps.statsd-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-images/statsd.tar
+
+      - name: Pull and cache StatsD image
+        if: steps.statsd-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-images
+          docker pull dblworks/statsd:v0.10.1
+          docker save dblworks/statsd:v0.10.1 -o /tmp/docker-images/statsd.tar
+
+      - name: Cache LocalStack image
+        uses: actions/cache@v4
+        id: localstack-cache
+        with:
+          path: /tmp/docker-images/localstack.tar
+          key: docker-${{ runner.os }}-localstack-2.3.2
+
+      - name: Load cached LocalStack image
+        if: steps.localstack-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-images/localstack.tar
+
+      - name: Pull and cache LocalStack image
+        if: steps.localstack-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-images
+          docker pull localstack/localstack:2.3.2
+          docker save localstack/localstack:2.3.2 -o /tmp/docker-images/localstack.tar
 
       - name: Run tests
         run: env TESTCONTAINERS_RYUK_DISABLED=true sbt clean +test

@@ -19,25 +19,22 @@ import com.github.dockerjava.api.model.Ports
 object Statsd {
   val image = "dblworks/statsd" // the official statsd/statsd size is monstrous
   val tag   = "v0.10.1"
-  def resource(
-    loggerName: String
-  ): Resource[IO, GenericContainer[_]] =
-    Resource.make {
-      val statsd: GenericContainer[_] = new GenericContainer(s"$image:$tag")
-      statsd.addExposedPort(8126)
-      statsd.setWaitStrategy(Wait.forLogMessage("""^(.*)server is up(.+)$""", 1))
-      statsd.withCreateContainerCmdModifier { cmd =>
-        val statsPort = 8125
-        cmd.withExposedPorts((cmd.getExposedPorts().toList :+ ExposedPort.udp(statsPort)).asJava)
-        val ports = cmd.getHostConfig().getPortBindings()
-        ports.bind(ExposedPort.udp(statsPort), Ports.Binding.bindPort(statsPort))
-        cmd.getHostConfig().withPortBindings(ports)
-        ()
-      }
-      IO.blocking(start(statsd, loggerName))
-    }(ls => IO.blocking(ls.stop()))
 
-  private def start(statsd: GenericContainer[_], loggerName: String): GenericContainer[_] = {
+  def resource(loggerName: String): Resource[IO, GenericContainer[_]] =
+    Resource.make(IO.blocking(startContainer(loggerName)))(c => IO.blocking(c.stop()))
+
+  private def startContainer(loggerName: String): GenericContainer[_] = {
+    val statsd: GenericContainer[_] = new GenericContainer(s"$image:$tag")
+    statsd.addExposedPort(8126)
+    statsd.setWaitStrategy(Wait.forLogMessage("""^(.*)server is up(.+)$""", 1))
+    statsd.withCreateContainerCmdModifier { cmd =>
+      val statsPort = 8125
+      cmd.withExposedPorts((cmd.getExposedPorts().toList :+ ExposedPort.udp(statsPort)).asJava)
+      val ports = cmd.getHostConfig().getPortBindings()
+      ports.bind(ExposedPort.udp(statsPort), Ports.Binding.bindPort(statsPort))
+      cmd.getHostConfig().withPortBindings(ports)
+      ()
+    }
     statsd.start()
     val logger = LoggerFactory.getLogger(loggerName)
     val logs   = new Slf4jLogConsumer(logger)

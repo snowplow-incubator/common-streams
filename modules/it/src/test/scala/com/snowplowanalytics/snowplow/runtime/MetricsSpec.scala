@@ -12,39 +12,32 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.testing.specs2.CatsResource
 import org.specs2.mutable.SpecificationLike
-import org.specs2.specification.BeforeAll
-import org.testcontainers.containers.GenericContainer
-import com.snowplowanalytics.snowplow.it.DockerPull
-
 import retry.syntax.all._
 import retry.RetryPolicies
 
-class MetricsSpec extends CatsResource[IO, (GenericContainer[_], StatsdAPI[IO])] with SpecificationLike with BeforeAll {
+class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike {
 
-  override def beforeAll(): Unit = {
-    DockerPull.pull(Statsd.image, Statsd.tag)
-    super.beforeAll()
-  }
+  override protected val ResourceTimeout = 1.minute
 
-  override val resource: Resource[IO, (GenericContainer[_], StatsdAPI[IO])] =
+  override val resource: Resource[IO, StatsdAPI[IO]] =
     for {
       statsd <- Statsd.resource(TestMetrics.getClass.getSimpleName)
       socket <- Resource.eval(IO.blocking(new Socket(statsd.getHost(), statsd.getMappedPort(8126))))
       statsdApi <- StatsdAPI.resource[IO](socket)
-    } yield (statsd, statsdApi)
+    } yield statsdApi
 
   override def is = s2"""
   MetricsSpec should
     deliver metrics to statsd $e1
   """
 
-  def e1 = withResource { case (statsd @ _, statsdApi) =>
+  def e1 = withResource { statsdApi =>
     for {
-      t <- TestMetrics.impl
+      t <- TestMetrics.impl(300.millis)
       _ <- t.count(100)
       _ <- t.time(10.seconds)
       f <- t.report.compile.drain.start
-      _ <- IO.sleep(150.millis)
+      _ <- IO.sleep(350.millis)
       counters <- statsdApi
                     .get(Metrics.MetricType.Count)
                     .retryingOnFailures(
@@ -81,7 +74,7 @@ object TestMetrics {
     def time(t: FiniteDuration) = ref.update(s => s.copy(timer = s.timer + t))
   }
 
-  def impl = Ref[IO]
+  def impl(period: FiniteDuration) = Ref[IO]
     .of(TestState.empty)
     .map { ref =>
       TestMetrics(
@@ -92,7 +85,7 @@ object TestMetrics {
             "localhost",
             8125,
             Map.empty,
-            100.millis,
+            period,
             ""
           )
         )

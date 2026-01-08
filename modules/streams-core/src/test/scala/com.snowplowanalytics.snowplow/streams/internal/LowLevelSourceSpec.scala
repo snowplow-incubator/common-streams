@@ -916,7 +916,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       sourceAndAck <- LowLevelSource.toSourceAndAck(testLowLevelSource(refActions, testConfig))
       processor = windowedProcessor(refActions, testConfig)
       fiber <- sourceAndAck.stream(config, processor).compile.drain.start
-      _ <- IO.sleep(30.minutes)
+      _ <- IO.sleep(30.minutes + 500.millis)
       reportedLatency <- sourceAndAck.currentStreamLatency
       _ <- fiber.cancel
     } yield reportedLatency must beNone
