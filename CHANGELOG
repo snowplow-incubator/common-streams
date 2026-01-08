@@ -1,3 +1,10 @@
+Version 0.19.0 (2026-01-08)
+--------------------------
+Fix flaky tests (#153)
+Streams core: Eager processing of inner streams (#151)
+Kafka source recover from RebalanceInProgressException (#149)
+Add configurable AWS SDK retry count for Kinesis source (#150)
+
 Version 0.18.0 (2025-12-01)
 --------------------------
 Use hard-coded AWS user-agent (#146)
