@@ -60,6 +60,8 @@ object Dependencies {
   val emberServer       = "org.http4s"             %% "http4s-ember-server"     % V.http4s
   val http4sCirce       = "org.http4s"             %% "http4s-circe"            % V.http4s
   val blazeClient       = "org.http4s"             %% "http4s-blaze-client"     % V.blaze
+  val blazeServer       = "org.http4s"             %% "http4s-blaze-server"     % V.blaze
+  val http4sDsl         = "org.http4s"             %% "http4s-dsl"              % V.http4s
   val decline           = "com.monovore"           %% "decline-effect"          % V.decline
   val circeConfig       = "io.circe"               %% "circe-config"            % V.circeConfig
   val circeGeneric      = "io.circe"               %% "circe-generic"           % V.circe
@@ -113,6 +115,8 @@ object Dependencies {
     catsRetry,
     collectionCompat,
     blazeClient,
+    blazeServer,
+    http4sDsl,
     circeConfig,
     circeGeneric,
     circeGenericExtra,
