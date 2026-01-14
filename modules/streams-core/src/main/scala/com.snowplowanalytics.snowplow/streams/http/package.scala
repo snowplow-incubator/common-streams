@@ -11,6 +11,7 @@ import cats.Id
 
 package object http {
 
-  type HttpSinkConfig = HttpSinkConfigM[Id]
+  type HttpSinkConfig   = HttpSinkConfigM[Id]
+  type HttpSourceConfig = HttpSourceConfigM[Id]
 
 }

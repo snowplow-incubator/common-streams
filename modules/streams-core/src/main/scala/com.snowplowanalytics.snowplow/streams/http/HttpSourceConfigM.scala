@@ -7,8 +7,10 @@
  */
 package com.snowplowanalytics.snowplow.streams.http
 
+import cats.Id
 import com.comcast.ip4s.Port
-import io.circe.Decoder
+import io.circe._
+import io.circe.generic.semiauto._
 
 /**
  * Configuration for the HTTP source
@@ -16,15 +18,23 @@ import io.circe.Decoder
  * @param port
  *   The port on which to listen for incoming HTTP requests
  */
-case class HttpSourceConfig(
-  port: Port
+case class HttpSourceConfigM[M[_]](
+  port: M[Port]
 )
 
-object HttpSourceConfig {
+object HttpSourceConfigM {
 
   private implicit val portDecoder: Decoder[Port] =
     Decoder.decodeInt.emap(i => Port.fromInt(i).toRight(s"Invalid port: $i"))
 
   implicit def decoder: Decoder[HttpSourceConfig] =
-    Decoder.forProduct1("port")(HttpSourceConfig.apply)
+    deriveDecoder[HttpSourceConfig]
+
+  implicit def optionalDecoder: Decoder[Option[HttpSourceConfig]] =
+    deriveDecoder[HttpSourceConfigM[Option]].map {
+      case HttpSourceConfigM(Some(s)) =>
+        Some(HttpSourceConfigM[Id](s))
+      case _ =>
+        None
+    }
 }

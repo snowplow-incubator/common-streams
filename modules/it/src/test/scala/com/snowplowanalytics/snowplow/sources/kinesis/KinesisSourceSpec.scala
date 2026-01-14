@@ -22,14 +22,14 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 
 import com.snowplowanalytics.snowplow.streams.EventProcessingConfig
 import com.snowplowanalytics.snowplow.streams.EventProcessingConfig.NoWindowing
-import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisSourceConfig}
+import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisHttpSourceConfig}
 
 import Utils._
 
 import org.specs2.specification.BeforeAll
 
 class KinesisSourceSpec
-    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig, KinesisFactory[IO])]
+    extends CatsResource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisHttpSourceConfig, KinesisFactory[IO])]
     with SpecificationLike
     with BeforeAll {
   import KinesisSourceSpec._
@@ -41,7 +41,7 @@ class KinesisSourceSpec
   }
 
   /** Resources which are shared across tests */
-  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisSourceConfig, KinesisFactory[IO])] =
+  override val resource: Resource[IO, (LocalStackContainer, KinesisAsyncClient, String => KinesisHttpSourceConfig, KinesisFactory[IO])] =
     for {
       region <- Resource.eval(IO.blocking((new DefaultAwsRegionProviderChain).getRegion))
       localstack <- Localstack.resource(region, KINESIS_INITIALIZE_STREAMS, KinesisSourceSpec.getClass.getSimpleName)

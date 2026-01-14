@@ -14,16 +14,20 @@ import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
 import com.snowplowanalytics.snowplow.streams.{Factory, Sink, SourceAndAck}
 import com.snowplowanalytics.snowplow.streams.kinesis.sink.KinesisSink
 import com.snowplowanalytics.snowplow.streams.kinesis.source.KinesisSource
+import com.snowplowanalytics.snowplow.streams.http.source.HttpSource
 
 class KinesisFactory[F[_]: Async] private (
   client: SdkAsyncHttpClient
-) extends Factory[F, KinesisSourceConfig, KinesisSinkConfig] {
+) extends Factory[F, KinesisHttpSourceConfig, KinesisSinkConfig] {
 
   def sink(config: KinesisSinkConfig): Resource[F, Sink[F]] =
     KinesisSink.resource(config, client)
 
-  def source(config: KinesisSourceConfig): Resource[F, SourceAndAck[F]] =
-    Resource.eval(KinesisSource.build(config, client))
+  def source(config: KinesisHttpSourceConfig): Resource[F, SourceAndAck[F]] =
+    config.http match {
+      case Some(c) => HttpSource.resource(c)
+      case None    => Resource.eval(KinesisSource.build(config.kinesis, client))
+    }
 }
 
 object KinesisFactory {

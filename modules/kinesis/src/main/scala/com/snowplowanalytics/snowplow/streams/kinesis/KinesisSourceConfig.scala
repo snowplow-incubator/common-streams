@@ -76,7 +76,7 @@ object KinesisSourceConfig {
     private[KinesisSourceConfig] def decoder(implicit c: Configuration) = deriveConfiguredDecoder[Retrieval]
   }
 
-  implicit val decoder: Decoder[KinesisSourceConfig] = {
+  private[kinesis] implicit val decoder: Decoder[KinesisSourceConfig] = {
     implicit val config: Configuration = Configuration.default.withDiscriminator("type")
     val alternativeConfig              = config.withScreamingSnakeCaseConstructorNames
 

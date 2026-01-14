@@ -7,13 +7,16 @@
  */
 package com.snowplowanalytics.snowplow.streams.kinesis
 
+import cats.Id
 import io.circe.literal._
 import com.typesafe.config.ConfigFactory
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.Decoder
 import io.circe.generic.semiauto._
+import com.comcast.ip4s.Port
 import org.specs2.Specification
 import scala.concurrent.duration.DurationLong
+import com.snowplowanalytics.snowplow.streams.http.HttpSourceConfigM
 
 class KinesisSourceConfigSpec extends Specification {
   import KinesisSourceConfigSpec._
@@ -23,7 +26,11 @@ class KinesisSourceConfigSpec extends Specification {
     Decode a valid JSON config with PascalCase type hints $e1
     Decode a valid JSON config with CAPITALIZED type hints $e2
   The KinesisSource defaults should:
-    Provide default values from reference.conf $e3
+    Provide default values from reference.conf with old config format $e3
+    Provide default values from reference.conf with new config format $e4
+  The KinesisHttpSourceConfig decoder should:
+    Decode old config format $e5
+    Decode new config format $e6
   """
 
   def e1 = {
@@ -107,7 +114,7 @@ class KinesisSourceConfigSpec extends Specification {
   def e3 = {
     val input = s"""
     |{
-    |   "xyz": $${snowplow.defaults.sources.kinesis}
+    |   "xyz": $${snowplow.defaults.sources.aws}
     |   "xyz": {
     |     "appName": "my-app"
     |     "streamName": "my-stream"
@@ -133,15 +140,168 @@ class KinesisSourceConfigSpec extends Specification {
       maxRetries                       = 10
     )
 
-    result.as[Wrapper] must beRight.like { case w: Wrapper =>
+    result.as[KinesisSourceConfigWrapper] must beRight.like { case w: KinesisSourceConfigWrapper =>
       w.xyz must beEqualTo(expected)
+    }
+  }
+
+  def e4 = {
+    val input1 = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.aws}
+    |   "xyz": {
+    |     "kinesis": {
+    |       "appName": "my-app"
+    |       "streamName": "my-stream"
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val input2 = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.aws}
+    |   "xyz": {
+    |     "kinesis": {
+    |       "appName": "my-app"
+    |       "streamName": "my-stream"
+    |     }
+    |     "http": {
+    |       "port": 8000
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result1 = ConfigFactory.load(ConfigFactory.parseString(input1))
+
+    val result2 = ConfigFactory.load(ConfigFactory.parseString(input2))
+
+    val expected1 = KinesisHttpSourceConfig(
+      kinesis = KinesisSourceConfig(
+        appName                          = "my-app",
+        streamName                       = "my-stream",
+        workerIdentifier                 = System.getenv("HOSTNAME"),
+        initialPosition                  = KinesisSourceConfig.InitialPosition.Latest,
+        retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000),
+        customEndpoint                   = None,
+        dynamodbCustomEndpoint           = None,
+        cloudwatchCustomEndpoint         = None,
+        leaseDuration                    = 10.seconds,
+        maxLeasesToStealAtOneTimeFactor  = BigDecimal(2.0),
+        checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
+        debounceCheckpoints              = 10.seconds,
+        maxRetries                       = 10
+      ),
+      http = None
+    )
+
+    val expected2 = expected1.copy(http = Port.fromInt(8000).map(p => HttpSourceConfigM[Id](port = p)))
+
+    val match1 = result1.as[KinesisHttpSourceConfigWrapper] must beRight.like { case w: KinesisHttpSourceConfigWrapper =>
+      w.xyz must beEqualTo(expected1)
+    }
+
+    val match2 = result2.as[KinesisHttpSourceConfigWrapper] must beRight.like { case w: KinesisHttpSourceConfigWrapper =>
+      w.xyz must beEqualTo(expected2)
+    }
+
+    match1 and match2
+  }
+
+  def e5 = {
+    val json = json"""
+    {
+      "appName": "my-app",
+      "streamName": "my-stream",
+      "workerIdentifier": "my-identifier",
+      "retrievalMode": {
+        "type": "Polling",
+        "maxRecords": 42
+      },
+      "initialPosition": {
+        "type": "TrimHorizon"
+      },
+      "leaseDuration": "20 seconds",
+      "maxLeasesToStealAtOneTimeFactor": 0.42,
+      "checkpointThrottledBackoffPolicy": {
+        "minBackoff": "100 millis",
+        "maxBackoff": "1second"
+      },
+      "debounceCheckpoints": "42 seconds",
+      "maxRetries": 10
+    }
+    """
+
+    json.as[KinesisHttpSourceConfig] must beRight.like { case c: KinesisHttpSourceConfig =>
+      List(
+        c.kinesis.appName must beEqualTo("my-app"),
+        c.kinesis.streamName must beEqualTo("my-stream"),
+        c.kinesis.workerIdentifier must beEqualTo("my-identifier"),
+        c.kinesis.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
+        c.kinesis.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
+        c.kinesis.leaseDuration must beEqualTo(20.seconds),
+        c.kinesis.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
+        c.kinesis.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
+        c.kinesis.debounceCheckpoints must beEqualTo(42.seconds),
+        c.http must beNone
+      ).reduce(_ and _)
+    }
+  }
+
+  def e6 = {
+    val json = json"""
+    {
+      "kinesis": {
+        "appName": "my-app",
+        "streamName": "my-stream",
+        "workerIdentifier": "my-identifier",
+        "retrievalMode": {
+          "type": "Polling",
+          "maxRecords": 42
+        },
+        "initialPosition": {
+          "type": "TrimHorizon"
+        },
+        "leaseDuration": "20 seconds",
+        "maxLeasesToStealAtOneTimeFactor": 0.42,
+        "checkpointThrottledBackoffPolicy": {
+          "minBackoff": "100 millis",
+          "maxBackoff": "1second"
+        },
+        "debounceCheckpoints": "42 seconds",
+        "maxRetries": 10
+      },
+      "http": {
+        "port": 8000
+      }
+    }
+    """
+
+    json.as[KinesisHttpSourceConfig] must beRight.like { case c: KinesisHttpSourceConfig =>
+      List(
+        c.kinesis.appName must beEqualTo("my-app"),
+        c.kinesis.streamName must beEqualTo("my-stream"),
+        c.kinesis.workerIdentifier must beEqualTo("my-identifier"),
+        c.kinesis.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
+        c.kinesis.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
+        c.kinesis.leaseDuration must beEqualTo(20.seconds),
+        c.kinesis.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
+        c.kinesis.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
+        c.kinesis.debounceCheckpoints must beEqualTo(42.seconds),
+        c.http.map(_.port) must beEqualTo(Port.fromInt(8000))
+      ).reduce(_ and _)
     }
   }
 
 }
 
 object KinesisSourceConfigSpec {
-  case class Wrapper(xyz: KinesisSourceConfig)
+  case class KinesisSourceConfigWrapper(xyz: KinesisSourceConfig)
+  case class KinesisHttpSourceConfigWrapper(xyz: KinesisHttpSourceConfig)
 
-  implicit def wrapperDecoder: Decoder[Wrapper] = deriveDecoder[Wrapper]
+  implicit def kinesisSourceConfigWrapperDecoder: Decoder[KinesisSourceConfigWrapper] = deriveDecoder[KinesisSourceConfigWrapper]
+
+  implicit def kinesisHttpSourceConfigWrapperDecoder: Decoder[KinesisHttpSourceConfigWrapper] =
+    deriveDecoder[KinesisHttpSourceConfigWrapper]
 }

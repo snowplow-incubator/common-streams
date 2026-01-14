@@ -18,7 +18,13 @@ import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 import software.amazon.awssdk.services.kinesis.model.{GetRecordsRequest, GetShardIteratorRequest, PutRecordRequest, PutRecordResponse}
 
 import com.snowplowanalytics.snowplow.streams.{EventProcessor, TokenedEvents}
-import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, KinesisSinkConfigM, KinesisSourceConfig}
+import com.snowplowanalytics.snowplow.streams.kinesis.{
+  BackoffPolicy,
+  KinesisHttpSourceConfig,
+  KinesisSinkConfig,
+  KinesisSinkConfigM,
+  KinesisSourceConfig
+}
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -83,21 +89,25 @@ object Utils {
     out
   }
 
-  def getKinesisSourceConfig(endpoint: URI)(streamName: String): KinesisSourceConfig = KinesisSourceConfig(
-    UUID.randomUUID().toString,
-    streamName,
-    UUID.randomUUID.toString,
-    KinesisSourceConfig.InitialPosition.TrimHorizon,
-    KinesisSourceConfig.Retrieval.Polling(1),
-    Some(endpoint),
-    Some(endpoint),
-    Some(endpoint),
-    10.seconds,
-    BigDecimal(1.0),
-    BackoffPolicy(100.millis, 1.second),
-    10.seconds,
-    10
-  )
+  def getKinesisSourceConfig(endpoint: URI)(streamName: String): KinesisHttpSourceConfig =
+    KinesisHttpSourceConfig(
+      kinesis = KinesisSourceConfig(
+        UUID.randomUUID().toString,
+        streamName,
+        UUID.randomUUID.toString,
+        KinesisSourceConfig.InitialPosition.TrimHorizon,
+        KinesisSourceConfig.Retrieval.Polling(1),
+        Some(endpoint),
+        Some(endpoint),
+        Some(endpoint),
+        10.seconds,
+        BigDecimal(1.0),
+        BackoffPolicy(100.millis, 1.second),
+        10.seconds,
+        10
+      ),
+      http = None
+    )
 
   def getKinesisSinkConfig(endpoint: URI)(streamName: String): KinesisSinkConfig = KinesisSinkConfigM[Id](
     streamName,
