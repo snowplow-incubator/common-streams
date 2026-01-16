@@ -99,17 +99,20 @@ object HttpSource {
     val dsl = new Http4sDsl[F] {}
     import dsl._
 
-    HttpRoutes.of[F] { case req @ POST -> Root / "input" =>
-      req.contentType match {
-        case Some(ct) if ct.mediaType == MediaType.application.`octet-stream` =>
-          for {
-            bytes <- req.body.compile.to(ByteVector)
-            _ <- queue.offer(bytes.toByteBufferUnsafe)
-            response <- Ok()
-          } yield response
-        case _ =>
-          UnsupportedMediaType("Content-Type must be application/octet-stream")
-      }
+    HttpRoutes.of[F] {
+      // Temporary health probe
+      case _ @GET -> Root => Ok()
+      case req @ POST -> Root / "input" =>
+        req.contentType match {
+          case Some(ct) if ct.mediaType == MediaType.application.`octet-stream` =>
+            for {
+              bytes <- req.body.compile.to(ByteVector)
+              _ <- queue.offer(bytes.toByteBufferUnsafe)
+              response <- Ok()
+            } yield response
+          case _ =>
+            UnsupportedMediaType("Content-Type must be application/octet-stream")
+        }
     }
   }
 }
