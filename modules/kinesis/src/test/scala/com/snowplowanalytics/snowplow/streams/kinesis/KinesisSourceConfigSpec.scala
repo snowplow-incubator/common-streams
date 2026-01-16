@@ -34,7 +34,8 @@ class KinesisSourceConfigSpec extends Specification {
       "workerIdentifier": "my-identifier",
       "retrievalMode": {
         "type": "Polling",
-        "maxRecords": 42
+        "maxRecords": 42,
+        "idleTimeBetweenReads": "1500 millis"
       },
       "initialPosition": {
         "type": "TrimHorizon"
@@ -56,7 +57,7 @@ class KinesisSourceConfigSpec extends Specification {
         c.streamName must beEqualTo("my-stream"),
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
-        c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
+        c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42, 1500.millis)),
         c.leaseDuration must beEqualTo(20.seconds),
         c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
         c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
@@ -73,7 +74,8 @@ class KinesisSourceConfigSpec extends Specification {
       "workerIdentifier": "my-identifier",
       "retrievalMode": {
         "type": "POLLING",
-        "maxRecords": 42
+        "maxRecords": 42,
+        "idleTimeBetweenReads": "1500 millis"
       },
       "initialPosition": {
         "type": "TRIM_HORIZON"
@@ -95,7 +97,7 @@ class KinesisSourceConfigSpec extends Specification {
         c.streamName must beEqualTo("my-stream"),
         c.workerIdentifier must beEqualTo("my-identifier"),
         c.initialPosition must beEqualTo(KinesisSourceConfig.InitialPosition.TrimHorizon),
-        c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42)),
+        c.retrievalMode must beEqualTo(KinesisSourceConfig.Retrieval.Polling(42, 1500.millis)),
         c.leaseDuration must beEqualTo(20.seconds),
         c.maxLeasesToStealAtOneTimeFactor must beEqualTo(BigDecimal(0.42)),
         c.checkpointThrottledBackoffPolicy must beEqualTo(BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second)),
@@ -122,7 +124,7 @@ class KinesisSourceConfigSpec extends Specification {
       streamName                       = "my-stream",
       workerIdentifier                 = System.getenv("HOSTNAME"),
       initialPosition                  = KinesisSourceConfig.InitialPosition.Latest,
-      retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000),
+      retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000, 1500.millis),
       customEndpoint                   = None,
       dynamodbCustomEndpoint           = None,
       cloudwatchCustomEndpoint         = None,
