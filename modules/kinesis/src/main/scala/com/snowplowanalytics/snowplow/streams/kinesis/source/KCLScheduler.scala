@@ -81,8 +81,10 @@ private[source] object KCLScheduler {
             kinesisConfig.retrievalMode match {
               case KinesisSourceConfig.Retrieval.FanOut =>
                 new FanOutConfig(kinesisClient).streamName(kinesisConfig.streamName).applicationName(kinesisConfig.appName)
-              case KinesisSourceConfig.Retrieval.Polling(maxRecords) =>
-                val c = new PollingConfig(kinesisConfig.streamName, kinesisClient).maxRecords(maxRecords)
+              case KinesisSourceConfig.Retrieval.Polling(maxRecords, idleTimeBetweenReads) =>
+                val c = new PollingConfig(kinesisConfig.streamName, kinesisClient)
+                  .maxRecords(maxRecords)
+                  .idleTimeBetweenReadsInMillis(idleTimeBetweenReads.toMillis)
                 c.recordsFetcherFactory.maxPendingProcessRecordsInput(1)
                 c.kinesisRequestTimeout(
                   JavaDuration.ofMillis(Long.MaxValue)

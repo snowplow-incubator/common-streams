@@ -96,7 +96,7 @@ object Utils {
         streamName,
         UUID.randomUUID.toString,
         KinesisSourceConfig.InitialPosition.TrimHorizon,
-        KinesisSourceConfig.Retrieval.Polling(1),
+        KinesisSourceConfig.Retrieval.Polling(1, 1500.millis),
         Some(endpoint),
         Some(endpoint),
         Some(endpoint),

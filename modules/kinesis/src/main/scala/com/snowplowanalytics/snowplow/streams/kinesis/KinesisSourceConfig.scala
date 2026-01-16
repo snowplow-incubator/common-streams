@@ -71,7 +71,7 @@ object KinesisSourceConfig {
   sealed trait Retrieval
 
   object Retrieval {
-    case class Polling(maxRecords: Int) extends Retrieval
+    case class Polling(maxRecords: Int, idleTimeBetweenReads: FiniteDuration) extends Retrieval
     case object FanOut extends Retrieval
 
     private[KinesisSourceConfig] def decoder(implicit c: Configuration) = deriveConfiguredDecoder[Retrieval]
