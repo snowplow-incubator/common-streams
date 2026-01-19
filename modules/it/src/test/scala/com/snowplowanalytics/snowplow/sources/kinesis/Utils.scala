@@ -104,7 +104,8 @@ object Utils {
         BigDecimal(1.0),
         BackoffPolicy(100.millis, 1.second),
         10.seconds,
-        10
+        10,
+        15.seconds
       ),
       http = None
     )

@@ -29,6 +29,8 @@ import java.net.URI
 import java.util.Date
 import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicReference
+import java.time.{Duration => JavaDuration}
+import scala.concurrent.duration.FiniteDuration
 
 import com.snowplowanalytics.snowplow.streams.kinesis.{AWS_USER_AGENT, KinesisSourceConfig}
 
@@ -45,9 +47,9 @@ private[source] object KCLScheduler {
       .maxAttempts(config.maxRetries)
       .build()
     for {
-      kinesis <- mkKinesisClient[F](config.customEndpoint, retryStrategy, client)
-      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, retryStrategy, client)
-      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, retryStrategy, client)
+      kinesis <- mkKinesisClient[F](config.customEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
+      dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
+      cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
       scheduler <- Resource.eval(mkScheduler(kinesis, dynamo, cloudWatch, config, queue))
       _ <- runInBackground(scheduler)
     } yield ()
@@ -82,6 +84,9 @@ private[source] object KCLScheduler {
               case KinesisSourceConfig.Retrieval.Polling(maxRecords) =>
                 val c = new PollingConfig(kinesisConfig.streamName, kinesisClient).maxRecords(maxRecords)
                 c.recordsFetcherFactory.maxPendingProcessRecordsInput(1)
+                c.kinesisRequestTimeout(
+                  JavaDuration.ofMillis(Long.MaxValue)
+                ) // Timeout is bounded by retry count * api call attempt timeout
                 c
             }
           }
@@ -90,6 +95,7 @@ private[source] object KCLScheduler {
         configsBuilder.leaseManagementConfig
           .failoverTimeMillis(kinesisConfig.leaseDuration.toMillis)
           .maxLeasesToStealAtOneTime(chooseMaxLeasesToStealAtOneTime(kinesisConfig))
+          .dynamoDbRequestTimeout(JavaDuration.ofMillis(Long.MaxValue)) // Timeout is bounded by retry count * api call attempt timeout
 
       // We ask to see empty batches, so that we can update the health check even when there are no records in the stream
       val processorConfig =
@@ -132,6 +138,7 @@ private[source] object KCLScheduler {
 
   private def mkKinesisClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    apiCallAttemptTimeout: FiniteDuration,
     retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, KinesisAsyncClient] =
@@ -143,6 +150,7 @@ private[source] object KCLScheduler {
           .httpClient(client)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
+            c.apiCallAttemptTimeout(JavaDuration.ofMillis(apiCallAttemptTimeout.toMillis))
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
@@ -153,6 +161,7 @@ private[source] object KCLScheduler {
 
   private def mkDynamoDbClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    apiCallAttemptTimeout: FiniteDuration,
     retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, DynamoDbAsyncClient] =
@@ -164,6 +173,7 @@ private[source] object KCLScheduler {
           .httpClient(client)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
+            c.apiCallAttemptTimeout(JavaDuration.ofMillis(apiCallAttemptTimeout.toMillis))
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
@@ -174,6 +184,7 @@ private[source] object KCLScheduler {
 
   private def mkCloudWatchClient[F[_]: Sync](
     customEndpoint: Option[URI],
+    apiCallAttemptTimeout: FiniteDuration,
     retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, CloudWatchAsyncClient] =
@@ -185,6 +196,7 @@ private[source] object KCLScheduler {
           .httpClient(client)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
+            c.apiCallAttemptTimeout(JavaDuration.ofMillis(apiCallAttemptTimeout.toMillis))
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }

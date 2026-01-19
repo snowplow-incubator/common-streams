@@ -53,7 +53,8 @@ class KinesisSourceConfigSpec extends Specification {
         "maxBackoff": "1second"
       },
       "debounceCheckpoints": "42 seconds",
-      "maxRetries": 10
+      "maxRetries": 10,
+      "apiCallAttemptTimeout": "42 millis"
     }
     """
 
@@ -92,7 +93,8 @@ class KinesisSourceConfigSpec extends Specification {
         "maxBackoff": "1second"
       },
       "debounceCheckpoints": "42 seconds",
-      "maxRetries": 10
+      "maxRetries": 10,
+      "apiCallAttemptTimeout": "42 millis"
     }
     """
 
@@ -137,7 +139,8 @@ class KinesisSourceConfigSpec extends Specification {
       maxLeasesToStealAtOneTimeFactor  = BigDecimal(2.0),
       checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
       debounceCheckpoints              = 10.seconds,
-      maxRetries                       = 10
+      maxRetries                       = 10,
+      apiCallAttemptTimeout            = 15.seconds
     )
 
     result.as[KinesisSourceConfigWrapper] must beRight.like { case w: KinesisSourceConfigWrapper =>
@@ -191,7 +194,8 @@ class KinesisSourceConfigSpec extends Specification {
         maxLeasesToStealAtOneTimeFactor  = BigDecimal(2.0),
         checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
         debounceCheckpoints              = 10.seconds,
-        maxRetries                       = 10
+        maxRetries                       = 10,
+        apiCallAttemptTimeout            = 15.seconds
       ),
       http = None
     )
@@ -229,7 +233,8 @@ class KinesisSourceConfigSpec extends Specification {
         "maxBackoff": "1second"
       },
       "debounceCheckpoints": "42 seconds",
-      "maxRetries": 10
+      "maxRetries": 10,
+      "apiCallAttemptTimeout": "42 millis"
     }
     """
 
@@ -270,7 +275,8 @@ class KinesisSourceConfigSpec extends Specification {
           "maxBackoff": "1second"
         },
         "debounceCheckpoints": "42 seconds",
-        "maxRetries": 10
+        "maxRetries": 10,
+        "apiCallAttemptTimeout": "42 millis"
       },
       "http": {
         "port": 8000
