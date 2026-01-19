@@ -38,7 +38,10 @@ object KinesisFactory {
   def makeClient[F[_]: Sync]: Resource[F, SdkAsyncHttpClient] =
     Resource.fromAutoCloseable {
       Sync[F].delay {
-        NettyNioAsyncHttpClient.builder().build()
+        NettyNioAsyncHttpClient
+          .builder()
+          .maxConcurrency(Int.MaxValue)
+          .build()
       }
     }
 }
