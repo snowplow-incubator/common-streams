@@ -1,3 +1,15 @@
+Version 0.20.0 (2026-01-21)
+--------------------------
+Kinesis source: make idleTimeBetweenReadsInMillis configurable for polling (#6)
+Change kinesis default max records from 1000 to 750 (#10)
+Unbounded request concurrency for AWS SDK client (#8)
+Configure AWS SDK timeouts for Kinesis source (#9)
+HTTP Source: return 200 response for GET request to root path (#7)
+Create new config case class KinesisHttpSourceConfig (#5)
+Add HTTP Source (#4)
+Add HTTP Sink (#3)
+Add sync workflow for common-streams (#1)
+
 Version 0.19.0 (2026-01-08)
 --------------------------
 Fix flaky tests (#153)
