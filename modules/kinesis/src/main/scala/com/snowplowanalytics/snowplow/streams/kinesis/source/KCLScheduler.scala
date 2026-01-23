@@ -46,8 +46,13 @@ private[source] object KCLScheduler {
       .toBuilder
       .maxAttempts(config.maxRetries)
       .build()
+    // Enhanced Fan-Out uses long-lived streaming connections and should not have a short timeout
+    val kinesisTimeout = config.retrievalMode match {
+      case KinesisSourceConfig.Retrieval.FanOut     => None
+      case _: KinesisSourceConfig.Retrieval.Polling => Some(config.apiCallAttemptTimeout)
+    }
     for {
-      kinesis <- mkKinesisClient[F](config.customEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
+      kinesis <- mkKinesisClient[F](config.customEndpoint, kinesisTimeout, retryStrategy, client)
       dynamo <- mkDynamoDbClient[F](config.dynamodbCustomEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
       cloudWatch <- mkCloudWatchClient[F](config.cloudwatchCustomEndpoint, config.apiCallAttemptTimeout, retryStrategy, client)
       scheduler <- Resource.eval(mkScheduler(kinesis, dynamo, cloudWatch, config, queue))
@@ -140,7 +145,7 @@ private[source] object KCLScheduler {
 
   private def mkKinesisClient[F[_]: Sync](
     customEndpoint: Option[URI],
-    apiCallAttemptTimeout: FiniteDuration,
+    apiCallAttemptTimeout: Option[FiniteDuration],
     retryStrategy: RetryStrategy,
     client: SdkAsyncHttpClient
   ): Resource[F, KinesisAsyncClient] =
@@ -152,7 +157,7 @@ private[source] object KCLScheduler {
           .httpClient(client)
           .overrideConfiguration { c =>
             c.retryStrategy(retryStrategy)
-            c.apiCallAttemptTimeout(JavaDuration.ofMillis(apiCallAttemptTimeout.toMillis))
+            apiCallAttemptTimeout.foreach(timeout => c.apiCallAttemptTimeout(JavaDuration.ofMillis(timeout.toMillis)))
             c.putAdvancedOption(SdkAdvancedClientOption.USER_AGENT_PREFIX, AWS_USER_AGENT)
             ()
           }
