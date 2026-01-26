@@ -37,6 +37,7 @@ object Dependencies {
     val azureSdk = "1.18.0"
     val nsq      = "1.6.0"
     val jwt      = "10.5"
+    val sentry   = "7.16.0"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
@@ -94,6 +95,7 @@ object Dependencies {
   val azureIdentity = "com.azure"        % "azure-identity"  % V.azureSdk
   val nsq           = "com.sproutsocial" % "nsq-j"           % V.nsq
   val jwt           = "com.nimbusds"     % "nimbus-jose-jwt" % V.jwt
+  val sentry        = "io.sentry"        % "sentry"          % V.sentry
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
   val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
@@ -187,6 +189,7 @@ object Dependencies {
     igluClient,
     log4cats,
     slf4jApi,
+    sentry,
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,
