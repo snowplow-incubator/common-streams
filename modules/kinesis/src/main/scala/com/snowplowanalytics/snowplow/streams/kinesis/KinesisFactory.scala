@@ -16,6 +16,8 @@ import com.snowplowanalytics.snowplow.streams.kinesis.sink.KinesisSink
 import com.snowplowanalytics.snowplow.streams.kinesis.source.KinesisSource
 import com.snowplowanalytics.snowplow.streams.http.source.HttpSource
 
+import java.time.{Duration => JavaDuration}
+
 class KinesisFactory[F[_]: Async] private (
   client: SdkAsyncHttpClient
 ) extends Factory[F, KinesisHttpSourceConfig, KinesisSinkConfig] {
@@ -41,6 +43,7 @@ object KinesisFactory {
         NettyNioAsyncHttpClient
           .builder()
           .maxConcurrency(Int.MaxValue)
+          .connectionAcquisitionTimeout(JavaDuration.ofMillis(Long.MaxValue)) // Timeout is bounded by underlying TCP connection timeouts
           .build()
       }
     }
