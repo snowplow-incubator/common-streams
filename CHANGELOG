@@ -1,3 +1,9 @@
+Version 0.21.0 (2026-02-05)
+--------------------------
+Add Sentry class (#13)
+Unbounded connection acquisition timeout for AWS SDK client (#14)
+Fix Enhanced Fan-Out timeout with apiCallAttemptTimeout (#12)
+
 Version 0.20.0 (2026-01-21)
 --------------------------
 Kinesis source: make idleTimeBetweenReadsInMillis configurable for polling (#6)
