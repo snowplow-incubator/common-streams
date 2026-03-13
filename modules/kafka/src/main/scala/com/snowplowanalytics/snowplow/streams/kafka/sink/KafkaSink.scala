@@ -9,7 +9,7 @@ package com.snowplowanalytics.snowplow.streams.kafka.sink
 
 import cats.implicits._
 import cats.effect.{Async, Ref, Resource, Sync}
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
+import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerRecord}
 import org.apache.kafka.common.errors.{InvalidProducerEpochException, OutOfOrderSequenceException}
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSerializer}
@@ -30,15 +30,22 @@ private[kafka] object KafkaSink {
   def resource[F[_]: Async](
     config: KafkaSinkConfig,
     authHandlerClass: String
+  ): Resource[F, Sink[F]] =
+    resourceWithFactory(config, newProducer[F](config, authHandlerClass))
+
+  // Visible to tests so they can inject a mock producer factory
+  private[kafka] def resourceWithFactory[F[_]: Async](
+    config: KafkaSinkConfig,
+    makeProducer: F[Producer[String, Array[Byte]]]
   ): Resource[F, Sink[F]] = {
-    val acquire = newProducer[F](config, authHandlerClass).flatMap(Ref.of[F, KafkaProducer[String, Array[Byte]]](_))
-    val release = (ref: Ref[F, KafkaProducer[String, Array[Byte]]]) =>
+    val acquire = makeProducer.flatMap(Ref.of[F, Producer[String, Array[Byte]]](_))
+    val release = (ref: Ref[F, Producer[String, Array[Byte]]]) =>
       ref.get.flatMap(p => Sync[F].blocking(p.close()))
     for {
       producerRef <- Resource.make(acquire)(release)
       ec1         <- createExecutionContext
       ec2         <- createExecutionContext
-    } yield impl(config, authHandlerClass, producerRef, ec1, ec2)
+    } yield impl(config, makeProducer, producerRef, ec1, ec2)
   }
 
   private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
@@ -46,7 +53,7 @@ private[kafka] object KafkaSink {
   private def newProducer[F[_]: Sync](
     config: KafkaSinkConfig,
     authHandlerClass: String
-  ): F[KafkaProducer[String, Array[Byte]]] = Sync[F].delay {
+  ): F[Producer[String, Array[Byte]]] = Sync[F].delay {
     val producerSettings = Map(
       "bootstrap.servers"                -> config.bootstrapServers,
       "sasl.login.callback.handler.class" -> authHandlerClass,
@@ -58,8 +65,8 @@ private[kafka] object KafkaSink {
 
   private def impl[F[_]: Async](
     config: KafkaSinkConfig,
-    authHandlerClass: String,
-    producerRef: Ref[F, KafkaProducer[String, Array[Byte]]],
+    makeProducer: F[Producer[String, Array[Byte]]],
+    producerRef: Ref[F, Producer[String, Array[Byte]]],
     ecForSend: ExecutionContext,
     ecForWait: ExecutionContext
   ): Sink[F] =
@@ -94,7 +101,7 @@ private[kafka] object KafkaSink {
       // valid producer reference.
       private def replaceProducer: F[Unit] =
         for {
-          replacement <- newProducer[F](config, authHandlerClass)
+          replacement <- makeProducer
           old         <- producerRef.getAndSet(replacement)
           _           <- Sync[F].blocking(old.close())
         } yield ()
