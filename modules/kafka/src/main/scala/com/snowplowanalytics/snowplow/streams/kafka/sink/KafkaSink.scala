@@ -20,7 +20,7 @@ import com.snowplowanalytics.snowplow.streams.kafka.KafkaSinkConfig
 
 import java.util.UUID
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.{ExecutionException, Executors}
+import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters._
 
