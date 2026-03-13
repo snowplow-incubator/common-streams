@@ -20,7 +20,7 @@ import com.snowplowanalytics.snowplow.streams.kafka.KafkaSinkConfig
 
 import java.util.UUID
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
+import java.util.concurrent.{ExecutionException, Executors}
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters._
 
@@ -69,8 +69,15 @@ private[kafka] object KafkaSink {
           }.toIndexedSeq
         }
         Async[F].evalOn(futures, ecForSend).flatMap { fs =>
-          val await = Sync[F].delay {
-            fs.foreach(_.get)
+          val await = Sync[F].blocking {
+            fs.foreach { f =>
+              try f.get()
+              catch {
+                case e: InterruptedException =>
+                  Thread.currentThread().interrupt()
+                  throw e
+              }
+            }
           }
           Async[F].evalOn(await, ecForWait)
         }
