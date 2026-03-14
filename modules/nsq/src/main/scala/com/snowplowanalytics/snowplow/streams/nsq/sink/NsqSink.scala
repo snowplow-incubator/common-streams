@@ -34,6 +34,9 @@ private[nsq] object NsqSink {
 
         def isHealthy: F[Boolean] =
           Sync[F].pure(true)
+
+        def healthReporter: F[Option[String]] =
+          Async[F].pure(None)
       }
     }
 

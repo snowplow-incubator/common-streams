@@ -40,7 +40,37 @@ trait Sink[F[_]] {
    *
    * An application calling `isHealthy` should check for all types of result: true / false /
    * exception
+   *
+   * Note: this method is intended for use at application startup, to wait until the sink is ready
+   * before processing begins. It is not intended for continuous runtime health monitoring. For that,
+   * see [[healthReporter]].
    */
   def isHealthy: F[Boolean]
+
+  /**
+   * A runtime health reporter suitable for continuous monitoring during event processing.
+   *
+   * Unlike [[isHealthy]], which probes the external resource once (e.g. checks partition leaders),
+   * this method reflects the observed health of the sink based on the outcomes of recent [[sink]]
+   * calls. It is intended to be polled on every liveness probe request.
+   *
+   * Returns `Some(reason)` if the sink appears persistently broken (e.g. after a sequence of
+   * consecutive failures), or `None` if the sink is healthy.
+   *
+   * ==Wiring into AppHealth==
+   *
+   * Pass this reporter to [[com.snowplowanalytics.snowplow.runtime.AppHealth.init]] as a runtime
+   * reporter so the HTTP liveness probe returns 503 when the sink is unhealthy:
+   *
+   * {{{
+   * appHealth <- AppHealth.init[F, MyAlert, MyService](
+   *   List(goodSink.healthReporter, badSink.healthReporter, sourceAndAck.isHealthy(...).map(_.showIfUnhealthy))
+   * )
+   * }}}
+   *
+   * When the liveness probe returns 503, Kubernetes will restart the pod, which creates a fresh
+   * producer with a valid epoch.
+   */
+  def healthReporter: F[Option[String]]
 
 }
