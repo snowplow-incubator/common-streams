@@ -59,6 +59,9 @@ private[kinesis] object KinesisSink {
 
         def isHealthy: F[Boolean] =
           checkShardsAreOpen(config.streamName, p)
+
+        def healthReporter: F[Option[String]] =
+          Async[F].pure(None)
       }
     }
 

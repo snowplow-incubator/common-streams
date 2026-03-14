@@ -8,8 +8,8 @@
 package com.snowplowanalytics.snowplow.streams.kafka.sink
 
 import cats.implicits._
-import cats.effect.{Async, Resource, Sync}
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
+import cats.effect.{Async, Ref, Resource, Sync}
+import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerRecord}
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSerializer}
 import org.typelevel.log4cats.Logger
@@ -26,15 +26,37 @@ import scala.jdk.CollectionConverters._
 
 private[kafka] object KafkaSink {
 
+  /**
+   * Number of consecutive [[Sink.sink]] failures after which [[Sink.healthReporter]] reports the
+   * sink as unhealthy. A pod restart replaces the broken producer with a fresh epoch.
+   *
+   * Producer epoch errors (e.g. OUT_OF_ORDER_SEQUENCE_NUMBER) are not self-healing — the producer
+   * must be replaced. 5 consecutive failures provides a small buffer for transient broker hiccups
+   * while still catching the stuck-producer scenario quickly.
+   */
+  private val UnhealthyAfterConsecutiveFailures = 5
+
   def resource[F[_]: Async](
     config: KafkaSinkConfig,
     authHandlerClass: String
   ): Resource[F, Sink[F]] =
     for {
-      producer <- makeProducer(config, authHandlerClass)
-      ec1 <- createExecutionContext
-      ec2 <- createExecutionContext
-    } yield impl(config, producer, ec1, ec2)
+      producer          <- makeProducer(config, authHandlerClass)
+      ec1               <- createExecutionContext
+      ec2               <- createExecutionContext
+      consecutiveErrors <- Resource.eval(Ref[F].of(0))
+    } yield impl(config, producer, ec1, ec2, consecutiveErrors)
+
+  // Visible to tests so they can inject a mock producer without a real broker
+  private[kafka] def resourceWithProducer[F[_]: Async](
+    config: KafkaSinkConfig,
+    producer: Producer[String, Array[Byte]]
+  ): Resource[F, Sink[F]] =
+    for {
+      ec1               <- createExecutionContext
+      ec2               <- createExecutionContext
+      consecutiveErrors <- Resource.eval(Ref[F].of(0))
+    } yield impl(config, producer, ec1, ec2, consecutiveErrors)
 
   private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
@@ -43,10 +65,10 @@ private[kafka] object KafkaSink {
     authHandlerClass: String
   ): Resource[F, KafkaProducer[String, Array[Byte]]] = {
     val producerSettings = Map(
-      "bootstrap.servers" -> config.bootstrapServers,
+      "bootstrap.servers"                -> config.bootstrapServers,
       "sasl.login.callback.handler.class" -> authHandlerClass,
-      "key.serializer" -> classOf[StringSerializer].getName,
-      "value.serializer" -> classOf[ByteArraySerializer].getName
+      "key.serializer"                   -> classOf[StringSerializer].getName,
+      "value.serializer"                 -> classOf[ByteArraySerializer].getName
     ) ++ config.producerConf
     val make = Sync[F].delay {
       new KafkaProducer[String, Array[Byte]]((producerSettings: Map[String, AnyRef]).asJava)
@@ -56,12 +78,18 @@ private[kafka] object KafkaSink {
 
   private def impl[F[_]: Async](
     config: KafkaSinkConfig,
-    producer: KafkaProducer[String, Array[Byte]],
+    producer: Producer[String, Array[Byte]],
     ecForSend: ExecutionContext,
-    ecForWait: ExecutionContext
+    ecForWait: ExecutionContext,
+    consecutiveErrors: Ref[F, Int]
   ): Sink[F] =
     new Sink[F] {
-      def sink(batch: ListOfList[Sinkable]): F[Unit] = {
+      def sink(batch: ListOfList[Sinkable]): F[Unit] =
+        doSink(batch)
+          .flatTap(_ => consecutiveErrors.set(0))
+          .onError { case _ => consecutiveErrors.update(_ + 1) }
+
+      private def doSink(batch: ListOfList[Sinkable]): F[Unit] = {
         val futures = Sync[F].delay {
           batch.asIterable.map { e =>
             val record = toProducerRecord(config, e)
@@ -90,17 +118,23 @@ private[kafka] object KafkaSink {
               else
                 Logger[F].info(s"Confirmed topic ${config.topicName} has leaders for all partitions").as(true)
             }
+
+      def healthReporter: F[Option[String]] =
+        consecutiveErrors.get.map { n =>
+          if (n >= UnhealthyAfterConsecutiveFailures)
+            Some(s"Kafka producer for topic ${config.topicName} has failed $n consecutive times")
+          else
+            None
+        }
     }
 
   private def toProducerRecord(config: KafkaSinkConfig, sinkable: Sinkable): ProducerRecord[String, Array[Byte]] = {
-
     val headers = sinkable.attributes.map { case (k, v) =>
       new Header {
         def key: String        = k
         def value: Array[Byte] = v.getBytes(StandardCharsets.UTF_8)
       }
     }
-
     new ProducerRecord(config.topicName, null, sinkable.partitionKey.getOrElse(UUID.randomUUID.toString), sinkable.bytes, headers.asJava)
   }
 

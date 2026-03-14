@@ -43,6 +43,9 @@ private[pubsub] object PubsubSink {
 
         def isHealthy: F[Boolean] =
           topicExists(config, stub)
+
+        def healthReporter: F[Option[String]] =
+          Async[F].pure(None)
       }
     }
 

@@ -30,6 +30,8 @@ object HttpSink {
             batch.parTraverse_(sendRequest(config, httpClient, _))
 
           override def isHealthy: F[Boolean] = Async[F].pure(true)
+
+          override def healthReporter: F[Option[String]] = Async[F].pure(None)
         }
       }
 
