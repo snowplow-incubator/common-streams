@@ -10,7 +10,7 @@ package com.snowplowanalytics.snowplow.streams.kafka.sink
 import cats.implicits._
 import cats.effect.{Async, Ref, Resource, Sync}
 import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerRecord}
-import org.apache.kafka.common.errors.{InvalidProducerEpochException, OutOfOrderSequenceException}
+import org.apache.kafka.common.errors.{InvalidProducerEpochException, OutOfOrderSequenceException, TimeoutException => KafkaTimeoutException}
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSerializer}
 import org.typelevel.log4cats.Logger
@@ -69,14 +69,22 @@ private[kafka] object KafkaSink {
     producerRef: Ref[F, Producer[String, Array[Byte]]],
     ecForSend: ExecutionContext,
     ecForWait: ExecutionContext
-  ): Sink[F] =
+  ): Sink[F] = {
+    // With idempotent producers (enable.idempotence=true), OUT_OF_ORDER_SEQUENCE_NUMBER from the
+    // broker is not surfaced as OutOfOrderSequenceException to future.get(). Instead the client
+    // retries internally via an epoch-bump loop until delivery.timeout.ms expires, then throws
+    // KafkaTimeoutException (KAFKA-7848). We replace the producer on timeout only when idempotence
+    // is enabled: with idempotence off, a timeout means delivery outcome is uncertain and retrying
+    // risks duplicate delivery.
+    val idempotenceEnabled = config.producerConf.get("enable.idempotence").contains("true")
+
     new Sink[F] {
 
       def sink(batch: ListOfList[Sinkable]): F[Unit] =
         sendBatch(batch).recoverWith {
-          case e: ExecutionException if isProducerEpochError(e) =>
+          case e: ExecutionException if requiresProducerReplacement(e, idempotenceEnabled) =>
             Logger[F].warn(
-              s"Replacing Kafka producer after unrecoverable sequence error (${e.getCause.getClass.getSimpleName}), retrying batch"
+              s"Producer error on topic ${config.topicName} (${e.getCause.getClass.getSimpleName}): replacing producer and retrying batch"
             ) >> replaceProducer >> sendBatch(batch)
         }
 
@@ -123,12 +131,19 @@ private[kafka] object KafkaSink {
               }
         }
     }
+  }
 
-  private def isProducerEpochError(e: ExecutionException): Boolean =
+  private def requiresProducerReplacement(e: ExecutionException, idempotenceEnabled: Boolean): Boolean =
     e.getCause match {
       case _: OutOfOrderSequenceException   => true
       case _: InvalidProducerEpochException => true
-      case _                                => false
+      // For idempotent-only producers, OUT_OF_ORDER_SEQUENCE_NUMBER is not surfaced as
+      // OutOfOrderSequenceException to future.get(). The client retries internally via an
+      // epoch-bump loop until delivery.timeout.ms expires, then throws KafkaTimeoutException
+      // (KAFKA-7848). We only replace on timeout when idempotence is enabled: with idempotence
+      // off, delivery outcome on timeout is uncertain and retrying could produce duplicates.
+      case _: KafkaTimeoutException if idempotenceEnabled => true
+      case _                                              => false
     }
 
   private def toProducerRecord(config: KafkaSinkConfig, sinkable: Sinkable): ProducerRecord[String, Array[Byte]] = {
