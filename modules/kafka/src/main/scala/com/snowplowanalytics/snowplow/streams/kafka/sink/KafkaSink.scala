@@ -72,10 +72,16 @@ private[kafka] object KafkaSink {
   ): Sink[F] = {
     // With idempotent producers (enable.idempotence=true), OUT_OF_ORDER_SEQUENCE_NUMBER from the
     // broker is not surfaced as OutOfOrderSequenceException to future.get(). Instead the client
-    // retries internally via an epoch-bump loop until delivery.timeout.ms expires, then throws
-    // KafkaTimeoutException (KAFKA-7848). We replace the producer on timeout only when idempotence
-    // is enabled: with idempotence off, a timeout means delivery outcome is uncertain and retrying
-    // risks duplicate delivery.
+    // enters an internal epoch-bump retry loop (KAFKA-7848 — unresolved, no fix version assigned).
+    // This loop may not respect delivery.timeout.ms, meaning future.get() may never return unless
+    // delivery.timeout.ms is explicitly configured in producerConf. When it does expire, the client
+    // throws KafkaTimeoutException. We replace the producer on timeout only when idempotence is
+    // enabled: with idempotence off, OUT_OF_ORDER_SEQUENCE_NUMBER cannot occur (it is an
+    // idempotent-producer-only error), so a KafkaTimeoutException represents a genuine delivery
+    // timeout where the outcome is uncertain and retrying risks duplicate delivery.
+    //
+    // IMPORTANT: callers must set delivery.timeout.ms in producerConf when using idempotent
+    // producers to bound this loop. Without it, future.get() may block indefinitely.
     val idempotenceEnabled = config.producerConf.get("enable.idempotence").contains("true")
 
     new Sink[F] {
@@ -142,6 +148,9 @@ private[kafka] object KafkaSink {
       // epoch-bump loop until delivery.timeout.ms expires, then throws KafkaTimeoutException
       // (KAFKA-7848). We only replace on timeout when idempotence is enabled: with idempotence
       // off, delivery outcome on timeout is uncertain and retrying could produce duplicates.
+      // KafkaTimeoutException after delivery.timeout.ms expiry is the observable symptom of
+      // KAFKA-7848 with idempotence enabled. With idempotence disabled this error is a genuine
+      // delivery timeout and must not be retried blindly.
       case _: KafkaTimeoutException if idempotenceEnabled => true
       case _                                              => false
     }

@@ -126,7 +126,10 @@ class KafkaSinkSpec extends Specification with CatsEffect {
     }
   }
 
-  // KAFKA-7848: idempotent producers surface OUT_OF_ORDER_SEQUENCE_NUMBER as KafkaTimeoutException
+  // KAFKA-7848 (unresolved): idempotent producers enter an infinite epoch-bump retry loop on
+  // OUT_OF_ORDER_SEQUENCE_NUMBER. The loop may not respect delivery.timeout.ms; when
+  // delivery.timeout.ms is configured, the client eventually throws KafkaTimeoutException.
+  // Producer replacement on this exception is the workaround for the unresolved KAFKA-7848.
   def recoversFromTimeoutWithIdempotence = {
     val failingSendCount = new AtomicInteger(0)
     val successSendCount = new AtomicInteger(0)
