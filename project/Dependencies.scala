@@ -33,11 +33,12 @@ object Dependencies {
     val kinesisClient = "2.7.1"
 
     // java
-    val slf4j    = "2.0.17"
-    val azureSdk = "1.18.0"
-    val nsq      = "1.6.0"
-    val jwt      = "10.5"
-    val sentry   = "7.16.0"
+    val slf4j      = "2.0.17"
+    val azureSdk   = "1.18.0"
+    val nsq        = "1.6.0"
+    val jwt        = "10.5"
+    val sentry     = "7.16.0"
+    val micrometer = "1.14.4"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
@@ -47,10 +48,10 @@ object Dependencies {
 
     // tests
     val specs2           = "4.20.0"
-    val catsEffectSpecs2 = "1.5.0"
-    val localstack       = "1.19.0"
+    val catsEffectSpecs2 = "1.7.0"
+    val localstack       = "1.21.4"
     val eventGen         = "0.7.0"
-    val dockerJava       = "3.3.6"
+    val dockerJava       = "3.7.0"
   }
 
   val catsEffectKernel  = "org.typelevel"          %% "cats-effect-kernel"      % V.catsEffect
@@ -90,12 +91,14 @@ object Dependencies {
   val slf4jIt             = "org.slf4j"          % "slf4j-simple"               % V.slf4j
 
   // java
-  val slf4jSimple   = "org.slf4j"        % "slf4j-simple"    % V.slf4j
-  val slf4jApi      = "org.slf4j"        % "slf4j-api"       % V.slf4j
-  val azureIdentity = "com.azure"        % "azure-identity"  % V.azureSdk
-  val nsq           = "com.sproutsocial" % "nsq-j"           % V.nsq
-  val jwt           = "com.nimbusds"     % "nimbus-jose-jwt" % V.jwt
-  val sentry        = "io.sentry"        % "sentry"          % V.sentry
+  val slf4jSimple          = "org.slf4j"        % "slf4j-simple"                   % V.slf4j
+  val slf4jApi             = "org.slf4j"        % "slf4j-api"                      % V.slf4j
+  val azureIdentity        = "com.azure"        % "azure-identity"                 % V.azureSdk
+  val nsq                  = "com.sproutsocial" % "nsq-j"                          % V.nsq
+  val jwt                  = "com.nimbusds"     % "nimbus-jose-jwt"                % V.jwt
+  val sentry               = "io.sentry"        % "sentry"                         % V.sentry
+  val micrometerCore       = "io.micrometer"    % "micrometer-core"                % V.micrometer
+  val micrometerPrometheus = "io.micrometer"    % "micrometer-registry-prometheus" % V.micrometer
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
   val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
@@ -186,8 +189,11 @@ object Dependencies {
     emberServer,
     fs2,
     http4sCirce,
+    http4sDsl,
     igluClient,
     log4cats,
+    micrometerCore,
+    micrometerPrometheus,
     slf4jApi,
     sentry,
     specs2,

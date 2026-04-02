@@ -29,8 +29,11 @@ class MetricsConfigSpec extends Specification {
   The statsd defaults should:
     Provide default values from reference.conf $e4
     Not provide default value for prefix $e5
-
-
+  The prometheus config decoder should:
+    Decode a valid JSON config with tags $prom1
+    Decode a valid JSON config with empty tags $prom2
+  The prometheus defaults should:
+    Provide default values from reference.conf $prom3
   """
 
   def e1 = {
@@ -136,10 +139,58 @@ class MetricsConfigSpec extends Specification {
     }
   }
 
+  def prom1 = {
+    val json = json"""
+    {
+      "tags": {
+        "env": "production",
+        "app": "loader"
+      }
+    }
+    """
+
+    json.as[Metrics.PrometheusConfig] must beRight.like { case c: Metrics.PrometheusConfig =>
+      c.tags must beEqualTo(Map("env" -> "production", "app" -> "loader"))
+    }
+  }
+
+  def prom2 = {
+    val json = json"""
+    {
+      "tags": {}
+    }
+    """
+
+    json.as[Metrics.PrometheusConfig] must beRight.like { case c: Metrics.PrometheusConfig =>
+      c.tags must beEqualTo(Map.empty[String, String])
+    }
+  }
+
+  def prom3 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.prometheus}
+    |   "xyz": {
+    |     "tags": {
+    |       "env": "test"
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    result.as[PrometheusWrapper] must beRight.like { case w: PrometheusWrapper =>
+      w.xyz.tags must beEqualTo(Map("env" -> "test"))
+    }
+  }
+
 }
 
 object MetricsConfigSpec {
   case class StatsdWrapper(xyz: Option[Metrics.StatsdConfig])
+  case class PrometheusWrapper(xyz: Metrics.PrometheusConfig)
 
-  implicit def statsdWrapperDecoder: Decoder[StatsdWrapper] = deriveDecoder[StatsdWrapper]
+  implicit def statsdWrapperDecoder: Decoder[StatsdWrapper]         = deriveDecoder[StatsdWrapper]
+  implicit def prometheusWrapperDecoder: Decoder[PrometheusWrapper] = deriveDecoder[PrometheusWrapper]
 }

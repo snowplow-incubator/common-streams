@@ -8,8 +8,8 @@
 package com.snowplowanalytics.snowplow.runtime
 
 import java.net.Socket
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
-import cats.effect.{IO, Ref, Resource}
+import scala.concurrent.duration.DurationInt
+import cats.effect.{IO, Resource}
 import cats.effect.testing.specs2.CatsResource
 import org.specs2.mutable.SpecificationLike
 import retry.syntax.all._
@@ -21,96 +21,53 @@ class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike
 
   override val resource: Resource[IO, StatsdAPI[IO]] =
     for {
-      statsd <- Statsd.resource(TestMetrics.getClass.getSimpleName)
+      statsd <- Statsd.resource(classOf[MetricsSpec].getSimpleName)
       socket <- Resource.eval(IO.blocking(new Socket(statsd.getHost(), statsd.getMappedPort(8126))))
       statsdApi <- StatsdAPI.resource[IO](socket)
     } yield statsdApi
 
   override def is = s2"""
   MetricsSpec should
-    deliver metrics to statsd $e1
+    deliver counter and gauge metrics to statsd $e1
   """
 
   def e1 = withResource { statsdApi =>
-    for {
-      t <- TestMetrics.impl(300.millis)
-      _ <- t.count(100)
-      _ <- t.time(10.seconds)
-      f <- t.report.compile.drain.start
-      _ <- IO.sleep(350.millis)
-      counters <- statsdApi
-                    .get(Metrics.MetricType.Count)
+    val statsdConfig = Metrics.StatsdConfig(
+      hostname = "localhost",
+      port     = 8125,
+      tags     = Map.empty,
+      period   = 300.millis,
+      prefix   = "snowplow"
+    )
+    val prometheusConfig = Metrics.PrometheusConfig(tags = Map.empty)
+
+    Metrics.build[IO](Some(statsdConfig), prometheusConfig).use { entries =>
+      for {
+        counter <- entries.counter("events_count")
+        timer <- entries.timer("latency", IO.pure(None))
+        _ <- counter.add(100)
+        _ <- timer.record(10.seconds)
+        f <- entries.report.compile.drain.start
+        _ <- IO.sleep(350.millis)
+        counters <- statsdApi.getCounters
+                      .retryingOnFailures(
+                        v => IO.pure(v.contains("snowplow.events_count")),
+                        RetryPolicies.constantDelay[IO](10.milliseconds),
+                        (v, _) => IO.pure(println(s"Retry fetching metrics. Not ready: $v"))
+                      )
+        gauges <- statsdApi.getGauges
                     .retryingOnFailures(
-                      v => IO.pure(v.contains("snowplow.counter")),
+                      v => IO.pure(v.contains("snowplow.latency")),
                       RetryPolicies.constantDelay[IO](10.milliseconds),
                       (v, _) => IO.pure(println(s"Retry fetching metrics. Not ready: $v"))
                     )
-      gauges <- statsdApi
-                  .get(Metrics.MetricType.Gauge)
-                  .retryingOnFailures(
-                    v => IO.pure(v.contains("snowplow.timer")),
-                    RetryPolicies.constantDelay[IO](10.milliseconds),
-                    (v, _) => IO.pure(println(s"Retry fetching metrics. Not ready: $v"))
-                  )
-      _ <- f.cancel
-    } yield List(
-      counters.get("statsd.metrics_received") must beSome(2),
-      counters.get("snowplow.counter") must beSome(100),
-      gauges must haveSize(1),
-      gauges.get("snowplow.timer") must beSome(10)
-    ).reduce(_ and _)
-
-  }
-}
-
-object TestMetrics {
-
-  case class TestMetrics(
-    ref: Ref[IO, TestState],
-    emptyState: TestState,
-    config: Option[Metrics.StatsdConfig]
-  ) extends Metrics[IO, TestState](ref, IO.pure(emptyState), config) {
-    def count(c: Int)           = ref.update(s => s.copy(counter = s.counter + c))
-    def time(t: FiniteDuration) = ref.update(s => s.copy(timer = s.timer + t))
-  }
-
-  def impl(period: FiniteDuration) = Ref[IO]
-    .of(TestState.empty)
-    .map { ref =>
-      TestMetrics(
-        ref,
-        TestState.empty,
-        Some(
-          Metrics.StatsdConfig(
-            "localhost",
-            8125,
-            Map.empty,
-            period,
-            ""
-          )
-        )
-      )
+        _ <- f.cancel
+      } yield List(
+        counters.get("statsd.metrics_received") must beSome(2),
+        counters.get("snowplow.events_count") must beSome(100),
+        gauges must haveSize(1),
+        gauges.get("snowplow.latency") must beSome(10000)
+      ).reduce(_ and _)
     }
-
-  case class TestState(counter: Int, timer: FiniteDuration) extends Metrics.State {
-    override def toKVMetrics: List[Metrics.KVMetric] = List(
-      Count(counter),
-      Timer(timer)
-    )
-  }
-  object TestState {
-    def empty = TestState(0, 0.seconds)
-  }
-
-  case class Count(v: Int) extends Metrics.KVMetric {
-    val key        = "snowplow.counter"
-    val value      = v.toString()
-    val metricType = Metrics.MetricType.Count
-  }
-
-  case class Timer(v: FiniteDuration) extends Metrics.KVMetric {
-    val key        = "snowplow.timer"
-    val value      = v.toSeconds.toString()
-    val metricType = Metrics.MetricType.Gauge
   }
 }

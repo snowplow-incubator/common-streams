@@ -15,7 +15,8 @@ import cats.effect.{Resource, Sync}
 import io.circe.parser._
 
 trait StatsdAPI[F[_]] {
-  def get(metricType: Metrics.MetricType): F[Map[String, Int]]
+  def getCounters: F[Map[String, Int]]
+  def getGauges: F[Map[String, Int]]
 }
 
 object StatsdAPI {
@@ -23,17 +24,15 @@ object StatsdAPI {
     output <- Resource.eval(Sync[F].pure(new PrintWriter(socket.getOutputStream(), true)))
     input <- Resource.eval(Sync[F].pure(new BufferedReader(new InputStreamReader(socket.getInputStream()))))
   } yield new StatsdAPI[F] {
-    def get(metricType: Metrics.MetricType): F[Map[String, Int]] = for {
-      _ <- Sync[F].blocking(output.println(showMetric(metricType)))
+    def getCounters: F[Map[String, Int]] = get("counters")
+    def getGauges: F[Map[String, Int]]   = get("gauges")
+
+    private def get(metricType: String): F[Map[String, Int]] = for {
+      _ <- Sync[F].blocking(output.println(metricType))
       json <-
         Sync[F].pure(input.lines().iterator().asScala.takeWhile(!_.toLowerCase().contains("end")).mkString("\n").replaceAll("'", "\""))
       res <- Sync[F].fromEither(decode[Map[String, Int]](json))
       _ <- Sync[F].pure(println(s"""StatsD metrics received: ${res.mkString(", ")}"""))
     } yield res
-
-    private[this] def showMetric(metricType: Metrics.MetricType) = metricType match {
-      case Metrics.MetricType.Count => "counters"
-      case Metrics.MetricType.Gauge => "gauges"
-    }
   }
 }

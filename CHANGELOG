@@ -1,3 +1,10 @@
+Version 0.22.0 (2026-03-16)
+--------------------------
+Prometheus metrics endpoint (#22)
+Remove binary compatibility checks (#21)
+Bump IT test dependencies (#19)
+Fix duplicate shard processor detection (#17)
+
 Version 0.21.0 (2026-02-05)
 --------------------------
 Add Sentry class (#13)

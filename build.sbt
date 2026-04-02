@@ -30,7 +30,6 @@ lazy val streams: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(
     previewFixedPort := Some(9995),
@@ -43,7 +42,6 @@ lazy val kinesis: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(
     previewFixedPort := Some(9996),
@@ -60,7 +58,6 @@ lazy val IT: Project = project
   .in(file("modules/it"))
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .dependsOn(kinesis)
   .dependsOn(runtimeCommon)
   .settings(
@@ -75,7 +72,6 @@ lazy val kafka: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(
     previewFixedPort := Some(9997),
@@ -89,7 +85,6 @@ lazy val pubsub: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(
     previewFixedPort := Some(9998),
@@ -103,7 +98,6 @@ lazy val nsq: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(
     previewFixedPort := Some(9998),
@@ -121,7 +115,6 @@ lazy val runtimeCommon: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(BuildSettings.igluTestSettings)
   .settings(
@@ -139,7 +132,6 @@ lazy val loadersCommon: Project = project
   .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
-  .settings(BuildSettings.mimaSettings)
   .settings(BuildSettings.docsSettings)
   .settings(BuildSettings.igluTestSettings)
   .settings(

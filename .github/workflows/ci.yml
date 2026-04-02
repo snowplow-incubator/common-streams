@@ -64,8 +64,5 @@ jobs:
       - name: Run tests
         run: env TESTCONTAINERS_RYUK_DISABLED=true sbt clean +test
 
-      - name: Check binary compatibility
-        run: sbt mimaReportBinaryIssues
-
       - name: Check assets can be published
         run: sbt +publishLocal

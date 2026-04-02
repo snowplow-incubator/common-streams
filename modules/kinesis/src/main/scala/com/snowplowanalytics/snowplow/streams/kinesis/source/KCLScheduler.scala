@@ -68,6 +68,7 @@ private[source] object KCLScheduler {
     queue: LinkedBlockingQueue[KCLAction]
   ): F[Scheduler] =
     Sync[F].delay {
+      val currentShardIds = new AtomicReference(Set.empty[String])
       val configsBuilder =
         new ConfigsBuilder(
           kinesisConfig.streamName,
@@ -76,7 +77,7 @@ private[source] object KCLScheduler {
           dynamoDbClient,
           cloudWatchClient,
           kinesisConfig.workerIdentifier,
-          () => ShardRecordProcessor(queue, new AtomicReference(Set.empty[String]))
+          () => ShardRecordProcessor(queue, currentShardIds)
         )
 
       val retrievalConfig =

@@ -16,9 +16,6 @@ import org.scalafmt.sbt.ScalafmtPlugin.autoImport._
 // dynver plugin
 import sbtdynver.DynVerPlugin.autoImport._
 
-// Mima plugin
-import com.typesafe.tools.mima.plugin.MimaKeys._
-
 // Site plugin
 import com.typesafe.sbt.site.SitePreviewPlugin.autoImport.previewPath
 import com.typesafe.sbt.site.SitePlugin.autoImport._
@@ -89,26 +86,6 @@ object BuildSettings {
         url("https://snowplow.io")
       )
     )
-  )
-
-  // If new version introduces breaking changes,
-  // clear-out mimaBinaryIssueFilters and mimaPreviousVersions.
-  // Otherwise, add previous version to set without
-  // removing other versions.
-  val mimaPreviousVersions: Set[String] = Set()
-
-  lazy val mimaSettings = Seq(
-    mimaPreviousArtifacts := {
-      mimaPreviousVersions.map {
-        organization.value %% name.value % _
-      }
-    },
-    ThisBuild / mimaFailOnNoPrevious := false,
-    mimaBinaryIssueFilters ++= Seq(),
-    Test / test := {
-      val _ = mimaReportBinaryIssues.value
-      (Test / test).value
-    }
   )
 
   val docsSettings = Seq(
