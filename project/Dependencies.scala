@@ -161,7 +161,9 @@ object Dependencies {
     circeGeneric,
     azureIdentity,
     jwt,
-    specs2
+    specs2,
+    catsEffectSpecs2,
+    catsEffectTestkit
   )
 
   val pubsubDependencies = Seq(
