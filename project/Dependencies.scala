@@ -27,10 +27,11 @@ object Dependencies {
     val collectionCompat = "2.11.0"
 
     // Streams
-    val fs2Kafka      = "3.9.0"
-    val pubsub        = "1.141.4"
-    val awsSdk2       = "2.34.1"
-    val kinesisClient = "2.7.1"
+    val fs2Kafka       = "3.9.0"
+    val pubsub         = "1.141.4"
+    val awsSdk2        = "2.42.23"
+    val kinesisClient  = "2.7.1"
+    val kinesisClient3 = "3.4.1"
 
     // java
     val slf4j      = "2.0.17"
@@ -85,6 +86,11 @@ object Dependencies {
     .exclude("software.amazon.glue", "schema-registry-build-tools")
     .exclude("software.amazon.glue", "schema-registry-common")
     .exclude("software.amazon.glue", "schema-registry-serde")
+  val kinesisClient3 = ("software.amazon.kinesis" % "amazon-kinesis-client" % V.kinesisClient3)
+    .exclude("com.amazonaws", "amazon-kinesis-producer")
+    .exclude("software.amazon.glue", "schema-registry-build-tools")
+    .exclude("software.amazon.glue", "schema-registry-common")
+    .exclude("software.amazon.glue", "schema-registry-serde")
   val catsEffectTestingIt = "org.typelevel"     %% "cats-effect-testkit"        % V.catsEffect
   val catsEffectSpecs2It  = "org.typelevel"     %% "cats-effect-testing-specs2" % V.catsEffectSpecs2
   val localstackIt        = "org.testcontainers" % "localstack"                 % V.localstack
@@ -134,6 +140,19 @@ object Dependencies {
 
   val kinesisDependencies = Seq(
     kinesisClient,
+    arnsSdk2,
+    kinesisSdk2,
+    dynamoDbSdk2,
+    cloudwatchSdk2,
+    circeConfig,
+    circeGeneric,
+    circeGenericExtra,
+    circeLiteral % Test,
+    specs2
+  )
+
+  val kinesis3Dependencies = Seq(
+    kinesisClient3,
     arnsSdk2,
     kinesisSdk2,
     dynamoDbSdk2,

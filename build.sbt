@@ -13,12 +13,14 @@ lazy val root = project
   .aggregate(
     streams,
     kinesis,
+    kinesis3,
     kafka,
     pubsub,
     nsq,
     runtimeCommon,
     loadersCommon,
-    IT
+    IT,
+    IT3
   )
 
 lazy val streams: Project = project
@@ -50,6 +52,19 @@ lazy val kinesis: Project = project
   .settings(libraryDependencies ++= Dependencies.kinesisDependencies)
   .dependsOn(streams)
 
+lazy val kinesis3: Project = project
+  .in(file("modules/kinesis3"))
+  .enablePlugins(SiteScaladocPlugin, PreprocessPlugin, SitePreviewPlugin)
+  .settings(BuildSettings.buildSettings)
+  .settings(BuildSettings.publishSettings)
+  .settings(BuildSettings.docsSettings)
+  .settings(
+    previewFixedPort := Some(9993),
+    Preprocess / preprocessVars := Map("VERSION" -> version.value)
+  )
+  .settings(libraryDependencies ++= Dependencies.kinesis3Dependencies)
+  .dependsOn(streams)
+
 lazy val IT: Project = project
   .settings(
     name := "it"
@@ -59,6 +74,23 @@ lazy val IT: Project = project
   .settings(BuildSettings.buildSettings)
   .settings(BuildSettings.publishSettings)
   .dependsOn(kinesis)
+  .dependsOn(runtimeCommon)
+  .settings(
+    publish / skip := true,
+    publishLocal / skip := true,
+    Test / javaOptions ++= Seq("-Daws.region=eu-central-1", "-Daws.accessKeyId=test", "-Daws.secretAccessKey=test"),
+    libraryDependencies ++= Dependencies.kinesisItDependencies
+  )
+
+lazy val IT3: Project = project
+  .settings(
+    name := "it3"
+  )
+  .withId("it3")
+  .in(file("modules/it3"))
+  .settings(BuildSettings.buildSettings)
+  .settings(BuildSettings.publishSettings)
+  .dependsOn(kinesis3)
   .dependsOn(runtimeCommon)
   .settings(
     publish / skip := true,
@@ -144,6 +176,7 @@ lazy val loadersCommon: Project = project
 
 val StreamsCore   = config("streams-core")
 val Kinesis       = config("kinesis")
+val Kinesis3      = config("kinesis3")
 val Kafka         = config("kafka")
 val PubSub        = config("pubsub")
 val Nsq           = config("nsq")
@@ -153,6 +186,7 @@ val LoadersCommon = config("loaders-common")
 lazy val scaladocSiteProjects: List[(Project, sbt.Configuration)] = List(
   (streams, StreamsCore),
   (kinesis, Kinesis),
+  (kinesis3, Kinesis3),
   (kafka, Kafka),
   (pubsub, PubSub),
   (nsq, Nsq),
