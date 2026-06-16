@@ -1,3 +1,7 @@
+Version 0.24.1 (2026-05-08)
+--------------------------
+Do not report gauge and timer metrics that have not been updated since last report (#39)
+
 Version 0.24.0 (2026-04-27)
 --------------------------
 Add compression to streams-core module (#29)

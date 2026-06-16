@@ -37,7 +37,9 @@ object Metrics {
    * Each registered entry maintains separate internal state for the two protocols. Prometheus
    * metrics are accumulated continuously by micrometer and scraped on demand via the /metrics
    * endpoint. Statsd metrics are snapshot-and-reset: accumulated in Refs, reported periodically,
-   * then zeroed.
+   * then zeroed. Counters are reported on every cycle (emitting 0 when quiet, so dashboards see a
+   * continuous time-series instead of gaps); gauges and timers are suppressed when they have not
+   * been touched since the last report.
    */
   case class StatsdConfig(
     hostname: String,
@@ -98,7 +100,16 @@ object Metrics {
       _ <- Resource.fromAutoCloseable(Sync[F].delay(new JvmHeapPressureMetrics())).evalMap(m => Sync[F].delay(m.bindTo(registry)))
       _ <- Resource.eval(Sync[F].delay(new JvmThreadMetrics().bindTo(registry)))
       registeredEntries <- Resource.eval(Ref[F].of(List.empty[InternalEntry[F]]))
-    } yield new Entries[F] {
+      reporters <- makeReporters[F](statsdConfig)
+    } yield createEntries(registry, registeredEntries, reporters, statsdConfig.fold(1.minute)(_.period))
+
+  private[runtime] def createEntries[F[_]: Async](
+    registry: PrometheusMeterRegistry,
+    registeredEntries: Ref[F, List[InternalEntry[F]]],
+    reporters: List[Reporter[F]],
+    metricEmitPeriod: FiniteDuration
+  ): Entries[F] =
+    new Entries[F] {
       def counter(name: String): F[CounterEntry[F]] =
         for {
           accumulator <- Ref[F].of(0L)
@@ -109,7 +120,7 @@ object Metrics {
 
       def gauge(name: String): F[GaugeEntry[F]] =
         for {
-          statsdMax <- Ref[F].of(0L)
+          statsdMax <- Ref[F].of[Option[Long]](None)
           backing <- Sync[F].delay(new AtomicLong(0L))
           _ <- Sync[F].delay(registry.gauge(name, backing))
           entry = new InternalGaugeEntry[F](name, statsdMax, backing)
@@ -118,7 +129,7 @@ object Metrics {
 
       def timer(name: String, alternativeMaximum: F[Option[FiniteDuration]]): F[TimerEntry[F]] =
         for {
-          statsdMax <- Ref[F].of(Duration.Zero)
+          statsdMax <- Ref[F].of[Option[FiniteDuration]](None)
           micrometerTimer <- Sync[F].delay {
                                Timer
                                  .builder(name)
@@ -136,15 +147,14 @@ object Metrics {
       def report: Stream[F, Nothing] = {
         def doReport(reporters: List[Reporter[F]], allEntries: List[InternalEntry[F]]): F[Unit] =
           for {
-            kvs <- allEntries.traverse(_.snapshotAndReset)
+            kvs <- allEntries.traverse(_.snapshotAndReset).map(_.flatten)
             _ <- reporters.traverse(_.report(kvs))
           } yield ()
 
         val stream = for {
-          reporters <- Stream.resource(makeReporters[F](statsdConfig))
           allEntries <- Stream.eval(registeredEntries.get)
           _ <- Stream
-                 .fixedDelay[F](statsdConfig.fold(1.minute)(_.period))
+                 .fixedDelay[F](metricEmitPeriod)
                  .evalMap(_ => doReport(reporters, allEntries))
                  .onFinalize(doReport(reporters, allEntries))
         } yield ()
@@ -155,11 +165,16 @@ object Metrics {
 
   /** Private implementation */
 
-  private sealed trait InternalEntry[F[_]] {
-    def name: String
-    def snapshotAndReset: F[KVMetric]
+  private[runtime] sealed trait InternalEntry[F[_]] {
+    def snapshotAndReset: F[Option[KVMetric]]
   }
 
+  /**
+   * @param accumulator
+   *   Tracks the count within each statsd reporting period. Unlike gauges/timers, the counter is
+   *   reported on every cycle (emitting 0 when quiet) so that dashboards see a continuous
+   *   time-series instead of gaps.
+   */
   private class InternalCounterEntry[F[_]](
     val name: String,
     accumulator: Ref[F, Long],
@@ -172,9 +187,9 @@ object Metrics {
       accumulator.update(_ + count) *>
         F.delay(micrometerCounter.increment(count.toDouble))
 
-    def snapshotAndReset: F[KVMetric] =
+    def snapshotAndReset: F[Option[KVMetric]] =
       accumulator.getAndSet(0L).map { value =>
-        KVMetric(name, value.toString, MetricType.Count)
+        KVMetric(name, value.toString, MetricType.Count).some
       }
   }
 
@@ -186,19 +201,19 @@ object Metrics {
    */
   private class InternalGaugeEntry[F[_]](
     val name: String,
-    statsdMax: Ref[F, Long],
+    statsdMax: Ref[F, Option[Long]],
     backing: AtomicLong
   )(implicit F: Sync[F]
   ) extends InternalEntry[F]
       with GaugeEntry[F] {
 
     def set(value: Long): F[Unit] =
-      statsdMax.update(current => math.max(current, value)) *>
+      statsdMax.update(current => math.max(current.getOrElse(0L), value).some) *>
         F.delay(backing.set(value))
 
-    def snapshotAndReset: F[KVMetric] =
-      statsdMax.getAndSet(0L).map { value =>
-        KVMetric(name, value.toString, MetricType.Gauge)
+    def snapshotAndReset: F[Option[KVMetric]] =
+      statsdMax.getAndSet(None).map { value =>
+        value.map(v => KVMetric(name, v.toString, MetricType.Gauge))
       }
   }
 
@@ -211,7 +226,7 @@ object Metrics {
    */
   private class InternalTimerEntry[F[_]](
     val name: String,
-    statsdMax: Ref[F, FiniteDuration],
+    statsdMax: Ref[F, Option[FiniteDuration]],
     alternativeMaximum: F[Option[FiniteDuration]],
     micrometerTimer: Timer
   )(implicit F: Sync[F]
@@ -219,28 +234,28 @@ object Metrics {
       with TimerEntry[F] {
 
     def record(duration: FiniteDuration): F[Unit] =
-      statsdMax.update(current => current.max(duration)) *>
+      statsdMax.update(current => current.getOrElse(Duration.Zero).max(duration).some) *>
         F.delay(micrometerTimer.record(duration.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS))
 
-    def snapshotAndReset: F[KVMetric] =
+    def snapshotAndReset: F[Option[KVMetric]] =
       for {
-        recorded <- statsdMax.getAndSet(Duration.Zero)
+        recorded <- statsdMax.getAndSet(None)
         alternative <- alternativeMaximum
-        value = alternative.fold(recorded)(recorded.max(_))
-      } yield KVMetric(name, value.toMillis.toString, MetricType.Gauge)
+        combined = (recorded ++ alternative).reduceOption(_ max _)
+      } yield combined.map(v => KVMetric(name, v.toMillis.toString, MetricType.Gauge))
   }
 
-  private case class KVMetric(
+  private[runtime] case class KVMetric(
     key: String,
     value: String,
     metricType: MetricType
   )
 
-  private sealed trait MetricType {
+  private[runtime] sealed trait MetricType {
     def render: Char
   }
 
-  private object MetricType {
+  private[runtime] object MetricType {
     case object Gauge extends MetricType { def render = 'g' }
     case object Count extends MetricType { def render = 'c' }
   }
@@ -269,7 +284,7 @@ object Metrics {
 
   private implicit def logger[F[_]: Sync]: SelfAwareStructuredLogger[F] = Slf4jLogger.getLogger[F]
 
-  private trait Reporter[F[_]] {
+  private[runtime] trait Reporter[F[_]] {
     def report(metrics: List[KVMetric]): F[Unit]
   }
 
