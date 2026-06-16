@@ -13,13 +13,10 @@ import io.circe.generic.semiauto._
 /**
  * Configures the Pubsub Factory
  *
- * @param gcpUserAgent
- *   configures the user-agent header in requests to pubsub
  * @param emulatorHost
  *   Optional, e.g. `localhost:8181`. Use the pubsub emulator for local development.
  */
 case class PubsubFactoryConfig(
-  gcpUserAgent: GcpUserAgent,
   emulatorHost: Option[String]
 )
 

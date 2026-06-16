@@ -59,7 +59,7 @@ object PubsubFactory {
   private def makeChannel[F[_]: Sync](config: PubsubFactoryConfig, executor: ScheduledExecutorService): Resource[F, TransportChannel] =
     config.emulatorHost match {
       case Some(emulatorHost) => makeEmulatorChannel(emulatorHost)
-      case None               => makeProductionChannel(config.gcpUserAgent, executor)
+      case None               => makeProductionChannel(executor)
     }
 
   /**
@@ -78,7 +78,6 @@ object PubsubFactory {
    * Makes a `TransportChannel` for when _not_ using the pubsub emulator, i.e. the "real" pubsub
    */
   private def makeProductionChannel[F[_]: Sync](
-    gcpUserAgent: GcpUserAgent,
     executor: ScheduledExecutorService
   ): Resource[F, TransportChannel] = {
     val makeProvider = Sync[F].delay {
@@ -91,7 +90,7 @@ object PubsubFactory {
           ChannelPoolSettings.staticallySized(1)
         }
         .setEndpoint(SubscriptionAdminSettings.getDefaultEndpoint())
-        .setHeaderProvider(GcpUserAgent.headerProvider(gcpUserAgent))
+        .setHeaderProvider(GcpUserAgent.headerProvider)
         .setExecutor(executor)
         .build
     }

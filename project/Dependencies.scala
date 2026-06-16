@@ -40,6 +40,7 @@ object Dependencies {
     val jwt        = "10.5"
     val sentry     = "7.16.0"
     val micrometer = "1.14.4"
+    val zstd       = "1.5.7-4"
 
     // Snowplow
     val schemaDdl    = "0.26.0"
@@ -105,6 +106,7 @@ object Dependencies {
   val sentry               = "io.sentry"        % "sentry"                         % V.sentry
   val micrometerCore       = "io.micrometer"    % "micrometer-core"                % V.micrometer
   val micrometerPrometheus = "io.micrometer"    % "micrometer-registry-prometheus" % V.micrometer
+  val zstd                 = "com.github.luben" % "zstd-jni"                       % V.zstd
 
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
   val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
@@ -113,6 +115,7 @@ object Dependencies {
 
   // tests
   val specs2            = "org.specs2"            %% "specs2-core"                   % V.specs2           % Test
+  val specs2Scalacheck  = "org.specs2"            %% "specs2-scalacheck"             % V.specs2           % Test
   val catsEffectTestkit = "org.typelevel"         %% "cats-effect-testkit"           % V.catsEffect       % Test
   val catsEffectSpecs2  = "org.typelevel"         %% "cats-effect-testing-specs2"    % V.catsEffectSpecs2 % Test
   val eventGen          = "com.snowplowanalytics" %% "snowplow-event-generator-core" % V.eventGen         % Test
@@ -132,10 +135,13 @@ object Dependencies {
     circeGeneric,
     circeGenericExtra,
     specs2,
+    specs2Scalacheck,
     catsEffectSpecs2,
     catsEffectTestkit,
     slf4jApi,
-    slf4jSimple % Test
+    slf4jSimple % Test,
+    zstd,
+    badrows
   )
 
   val kinesisDependencies = Seq(

@@ -7,21 +7,12 @@
  */
 package com.snowplowanalytics.snowplow.streams.pubsub
 
-import cats.Show
-import cats.implicits._
-import io.circe.generic.semiauto._
-import io.circe.Decoder
 import com.google.api.gax.rpc.FixedHeaderProvider
 
-case class GcpUserAgent(productName: String, productVersion: String)
-
 object GcpUserAgent {
-  implicit def gcpUserAgentDecoder: Decoder[GcpUserAgent] = deriveDecoder[GcpUserAgent]
+  val solutionUrn: String = "isol_plb32_0014m00002tg62aqad_qufvepzajwfju6jxl5uwg2zn3l3nizte"
+  val userAgent: String   = s"Google/ISV Solution (GPN:$solutionUrn)"
 
-  implicit def showGcpUserAgent: Show[GcpUserAgent] = Show { ua =>
-    s"${ua.productName}/${ua.productVersion} (GPN:Snowplow;)"
-  }
-
-  def headerProvider(ua: GcpUserAgent): FixedHeaderProvider =
-    FixedHeaderProvider.create("user-agent", ua.show)
+  val headerProvider: FixedHeaderProvider =
+    FixedHeaderProvider.create("user-agent", userAgent)
 }

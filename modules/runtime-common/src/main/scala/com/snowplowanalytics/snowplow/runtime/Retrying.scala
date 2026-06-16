@@ -22,6 +22,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scala.concurrent.duration.FiniteDuration
+import java.sql.SQLException
 
 object Retrying {
 
@@ -96,7 +97,14 @@ object Retrying {
     )
 
   private def logError[F[_]: Sync](error: Throwable, details: RetryDetails): F[Unit] =
-    Logger[F].error(error)(show"Executing command failed. $details")
+    error match {
+      case sql: SQLException =>
+        Logger[F].error(error) {
+          show"Executing command failed with SQLException [errorCode=${sql.getErrorCode}, sqlState=${sql.getSQLState}]. $details"
+        }
+      case _ =>
+        Logger[F].error(error)(show"Executing command failed. $details")
+    }
 
   private def logErrorAndReportUnhealthy[F[_]: Sync, RuntimeService](
     appHealth: AppHealth.Interface[F, ?, RuntimeService],

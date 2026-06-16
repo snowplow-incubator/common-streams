@@ -1,3 +1,15 @@
+Version 0.24.0 (2026-04-27)
+--------------------------
+Add compression to streams-core module (#29)
+Add decompression to streams-core module (#30)
+Update PubSub user-agent header (#32)
+Remove restriction on health probe connections (#33)
+Add compression roundtrip tests (#31)
+Make bad row type configurable in PayloadProvider (#35)
+Treat SQLExceptions specially when logging exceptions (#36)
+Embed decompression into the source (#34)
+Add Claude Code GitHub Action workflow (#37)
+
 Version 0.23.0 (2026-04-01)
 --------------------------
 Add kinesis3 module with KCL 3.x (#27)

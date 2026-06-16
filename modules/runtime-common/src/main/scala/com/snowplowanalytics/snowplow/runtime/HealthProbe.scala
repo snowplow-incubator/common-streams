@@ -35,7 +35,6 @@ object HealthProbe {
       .default[F]
       .withHost(Ipv4Address.fromBytes(0, 0, 0, 0))
       .withPort(port)
-      .withMaxConnections(1)
       .withHttpApp(httpApp(appHealth, scrapeMetrics))
       .build
       .evalTap { _ =>
