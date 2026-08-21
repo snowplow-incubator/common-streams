@@ -9,133 +9,179 @@
 package com.snowplowanalytics.snowplow.streams.compression
 
 import java.nio.{ByteBuffer, ByteOrder}
-import java.io.OutputStream
 
 /**
- * Responsible for compressing a collection of "records" (arbitrary byte arrays) before we write to
- * a stream
+ * Compresses a collection of records into a single compressed frame.
+ *
+ * A single Compressor reuses its long-lived resources across many batches: call `reset` to begin a
+ * batch, `addRecord` for each record, and `result` to obtain the compressed bytes. It is NOT
+ * thread-safe; the caller must serialise access (a single fiber, or a Semaphore).
  */
-abstract class Compressor(val targetSize: Int) {
-
-  private var _recordCount: Int = 0
-
-  // ---- METHODS IMPLEMENTED BY CONCRETE CLASSES --- //
-
-  protected val compressor: OutputStream
-
-  protected def extraBytesNeededForFooter: Int
-
-  // ---- METHODS OPTIONALLY IMPLEMENTED BY CONCRETE CLASSES --- //
-
-  // Drop a marker. We might need to rewind _this_ state.
-  protected def mark(): Unit = ()
-
-  // Rewind to last memoized state when `mark()` got called
-  protected def rewindToMark(): Unit = ()
-
-  // To be called if we are satisfied the `write` did not exceed the target byte count
-  protected def commit(): Unit = ()
-
-  // ----- FINAL METHODS IMPLEMENTED BY BASE CLASS --- //
-
-  final def recordCount: Int = _recordCount
-
-  final protected val rwos = new RewindableOutputStream(targetSize)
+trait Compressor {
 
   /**
-   * Add another record to this compressed collection of records
+   * Begin a new batch: prepare a fresh output frame and write the Snowplow header.
    *
-   * Adding a record is only successful if the total compressed size remains smaller than the target
-   * size.
+   * `targetSize` is chosen per batch: it caps the compressed frame size and is the point at which
+   * `addRecord` starts rejecting records. It only affects this batch's heap-side output buffer, not
+   * the long-lived (off-heap) resources reused across batches, so it is cheap to vary from one
+   * batch to the next.
    *
-   * @param record
-   *   The uncompressed record to be added
-   * @return
-   *   A boolean telling us whether the addition was successful. False means the addition exceeded
-   *   the target size, and so the record has not been accepted by the compressor.
+   * Precondition: `targetSize` must be large enough to hold the compression framing overhead (the
+   * Snowplow header plus the format's own header/footer — on the order of a few tens of bytes).
+   * Below that a valid frame cannot be produced and `result` throws.
    */
-  final def addRecord(
+  def reset(payloadVersion: Int, targetSize: Int): Unit
+
+  /**
+   * Add a record to the current batch.
+   *
+   * @return
+   *   false if adding the record would push the compressed frame past the target size, in which
+   *   case the record is NOT added and the frame is rewound to before it.
+   *
+   * Once addRecord returns false, do not call it again for the current batch: take `result` to
+   * obtain the batch, then `reset` before adding further records. Adding a record after a
+   * rejection, or after `result`, throws IllegalStateException rather than silently corrupting the
+   * output.
+   */
+  def addRecord(
     record: Array[Byte],
     offset: Int,
     len: Int
-  ): Boolean = {
-    // Mark the output streams, so we can rewind the mark if we accidentally exceed the target output size
-    mark()
-    rwos.mark()
-
-    // Write 4 bytes, storing a 32-bit integer telling Enrich the size of the record
-    compressor.write(Compressor.sizeAsBytes(len))
-
-    // Now write the record to the compressed stream
-    compressor.write(record, offset, len)
-
-    // Flush the compressed stream, so that we can check the new total size of the compressed bytes
-    compressor.flush()
-
-    // The `extraBytesNeededForFooter` is needed because calling `.close()` adds an extra bytes to the output, depending on the algorithm
-    if (rwos.size() + extraBytesNeededForFooter > targetSize) {
-      // We have accidentally exceeded the target size, so rewind the streams to the mark.  This `addRecord` was not successful.
-      rwos.rewindToMark()
-      rewindToMark()
-      // Auto-close since failed addRecord indicates the compressor won't be used further
-      close()
-      false
-    } else {
-      // We have not exceeded the target size, so this `addRecord` was successful.
-      commit()
-      _recordCount += 1
-      true
-    }
-  }
+  ): Boolean
 
   /**
-   * Close the underlying compressor and release associated resources.
+   * Finish the current batch and return its compressed bytes.
    *
-   * This should be called when the compressor is no longer needed to prevent memory leaks.
+   * Must be called after `reset` and before the next `reset`; calling it before a batch has begun,
+   * or a second time on the same batch, throws IllegalStateException.
    */
-  final def close(): Unit = compressor.close()
+  def result: ByteBuffer
 
-  /**
-   * The compressed bytes comprising all successfully added records
-   */
-  final def result: ByteBuffer = {
-    close()
-    rwos.toByteBuffer()
-  }
-
-  // Write the 2-byte Snowplow header:
-  //   byte 0: compression format version
-  //   byte 1: application-specific payload format version
-  final private def initialize(payloadVersion: Int): Unit = {
-    compressor.write(1)
-    compressor.write(payloadVersion)
-  }
-
+  def recordCount: Int
 }
 
 object Compressor {
 
-  trait Factory {
-    protected def build(targetSize: Int): Compressor
+  /**
+   * Format-specific machinery that turns records into compressed bytes appended to a sink. One
+   * Engine instance is reused across batches; `begin` starts a fresh frame.
+   */
+  private[compression] trait Engine {
+    def begin(sink: RewindableOutputStream): Unit
+    def write(
+      bytes: Array[Byte],
+      off: Int,
+      len: Int
+    ): Unit
+    def flush(): Unit
+    def finish(): Unit
+    def footerOverhead: Int
 
-    final def buildAndInitialize(targetSize: Int, payloadVersion: Int): Compressor = {
-      val compressor = build(targetSize)
-      compressor.initialize(payloadVersion)
-      compressor
-    }
+    // Optional hooks; only gzip needs them (its footer embeds an input count and CRC).
+    def mark(): Unit         = ()
+    def rewindToMark(): Unit = ()
+    def commit(): Unit       = ()
   }
 
   /**
-   * Creates 4 bytes representing a 32-bit integer
+   * The lifecycle state of a Compressor, guarding against out-of-order calls that would otherwise
+   * silently corrupt the frame. Singletons compared by reference (`eq`/`ne`) on the hot path.
    *
-   * @param size
-   *   The value to serialize as a 32-bit integer
+   * Transitions (any call not listed here throws IllegalStateException):
+   *
+   *   - Uninitialised --reset--> Open
+   *   - Open --addRecord accepted--> Open
+   *   - Open --addRecord rejected--> Full
+   *   - Open --result--> Closed
+   *   - Full --result--> Closed
+   *   - Closed --reset--> Open
+   *
+   * So `addRecord` is only valid in `Open`, and `result` is valid in `Open` or `Full`.
    */
+  private[compression] sealed trait State
+  private[compression] object State {
+    case object Uninitialised extends State
+    case object Open extends State
+    case object Full extends State
+    case object Closed extends State
+  }
+
+  private[compression] final class Impl(engine: Engine) extends Compressor {
+    import State._
+
+    private var _recordCount: Int            = 0
+    private var _targetSize: Int             = 0
+    private var rwos: RewindableOutputStream = _
+    private var state: State                 = Uninitialised
+
+    override def recordCount: Int = _recordCount
+
+    override def reset(payloadVersion: Int, targetSize: Int): Unit = {
+      _recordCount = 0
+      _targetSize  = targetSize
+      rwos         = new RewindableOutputStream(targetSize)
+      engine.begin(rwos)
+      // Snowplow header: compression-format version, then payload-format version
+      engine.write(Array[Byte](1, payloadVersion.toByte), 0, 2)
+      state = Open
+    }
+
+    override def addRecord(
+      record: Array[Byte],
+      offset: Int,
+      len: Int
+    ): Boolean = {
+      if (state ne Open)
+        throw new IllegalStateException(
+          s"addRecord is not valid in state $state (expected Open); call reset to begin a new batch"
+        )
+      // Mark the engine and the output stream, so we can rewind if we accidentally exceed the target output size
+      engine.mark()
+      rwos.mark()
+
+      // Write 4 bytes, storing a 32-bit integer telling the reader the size of the record
+      engine.write(sizeAsBytes(len), 0, 4)
+
+      // Now write the record itself to the compressed stream
+      engine.write(record, offset, len)
+
+      // Flush the compressed stream, so that we can check the new total size of the compressed bytes
+      engine.flush()
+
+      // `footerOverhead` is needed because finishing the frame adds extra bytes to the output, depending on the algorithm
+      if (rwos.size() + engine.footerOverhead > _targetSize) {
+        // We have accidentally exceeded the target size, so rewind the engine and stream to the mark.  This `addRecord` was not successful.
+        rwos.rewindToMark()
+        engine.rewindToMark()
+        // The batch is full: no more records may be added, but `result` is still expected next.
+        state = Full
+        false
+      } else {
+        // We have not exceeded the target size, so this `addRecord` was successful.
+        engine.commit()
+        _recordCount += 1
+        true
+      }
+    }
+
+    override def result: ByteBuffer = {
+      if ((state ne Open) && (state ne Full))
+        throw new IllegalStateException(
+          s"result is not valid in state $state; call reset to begin a batch before taking its result"
+        )
+      engine.finish()
+      state = Closed
+      rwos.toByteBuffer()
+    }
+  }
+
+  /** Creates 4 bytes representing a 32-bit big-endian integer. */
   private def sizeAsBytes(size: Int): Array[Byte] = {
     val bb = ByteBuffer.allocate(4)
     bb.order(ByteOrder.BIG_ENDIAN)
     bb.putInt(size)
     bb.array
   }
-
 }

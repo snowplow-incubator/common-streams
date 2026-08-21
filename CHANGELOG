@@ -1,3 +1,8 @@
+Version 0.25.0 (2026-07-14)
+--------------------------
+Reuse zstd compression context across batches (#45)
+Bump schema-ddl to 0.27.2 (#46)
+
 Version 0.24.2 (2026-07-02)
 --------------------------
 Speed up CI with parallel jobs and compiled-output cache (#42)

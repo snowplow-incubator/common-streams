@@ -8,6 +8,9 @@
  */
 package com.snowplowanalytics.snowplow.streams.compression
 
+import cats.effect.IO
+import cats.effect.testing.specs2.CatsEffect
+import cats.effect.unsafe.implicits.global
 import org.scalacheck.Gen
 import org.specs2.ScalaCheck
 import org.specs2.Specification
@@ -15,10 +18,11 @@ import org.specs2.matcher.MatchResult
 
 import com.snowplowanalytics.snowplow.streams.compression.CompressionTestUtils.TestPayloadVersion
 
+import java.nio.ByteBuffer
 import scala.annotation.tailrec
 import scala.util.Random
 
-class CompressionRoundtripSpec extends Specification with ScalaCheck {
+class CompressionRoundtripSpec extends Specification with CatsEffect with ScalaCheck {
 
   def is = s2"""
   Compress/Decompress roundtrip should
@@ -28,25 +32,25 @@ class CompressionRoundtripSpec extends Specification with ScalaCheck {
 
   private def roundtripTests(
     compressionType: String,
-    cf: Compressor.Factory,
+    factory: CompressorFactory,
     df: Decompressor.Factory
   ) = {
-    def singleRecord      = roundtrip(cf, df, List("hello world".getBytes("UTF-8")))
-    def multipleRecs      = roundtrip(cf, df, multipleRecords)
-    def emptyRecord       = roundtrip(cf, df, List(Array.empty[Byte]))
-    def binaryData        = roundtrip(cf, df, binaryRecords)
-    def unicode           = roundtrip(cf, df, unicodeRecords)
-    def nullBytes         = roundtrip(cf, df, nullByteRecords)
-    def largePayload      = largePayloadRoundtrip(cf, df)
-    def mixedSizes        = roundtrip(cf, df, mixedSizeRecords)
-    def manySmall         = roundtrip(cf, df, manySmallRecords)
-    def payloadVersion    = payloadVersionRoundtrip(cf, df)
-    def recordCount       = recordCountRoundtrip(cf, df, fiveRecords)
-    def partialAcceptance = partialAcceptanceRoundtrip(cf, df)
-    def singleByte        = roundtrip(cf, df, List(Array[Byte](42)))
-    def highBitBytes      = roundtrip(cf, df, List(Array.tabulate[Byte](256)(i => i.toByte)))
+    def singleRecord      = roundtrip(factory, df, List("hello world".getBytes("UTF-8")))
+    def multipleRecs      = roundtrip(factory, df, multipleRecords)
+    def emptyRecord       = roundtrip(factory, df, List(Array.empty[Byte]))
+    def binaryData        = roundtrip(factory, df, binaryRecords)
+    def unicode           = roundtrip(factory, df, unicodeRecords)
+    def nullBytes         = roundtrip(factory, df, nullByteRecords)
+    def largePayload      = largePayloadRoundtrip(factory, df)
+    def mixedSizes        = roundtrip(factory, df, mixedSizeRecords)
+    def manySmall         = roundtrip(factory, df, manySmallRecords)
+    def payloadVersion    = payloadVersionRoundtrip(factory, df)
+    def recordCount       = recordCountRoundtrip(factory, df, fiveRecords)
+    def partialAcceptance = partialAcceptanceRoundtrip(factory, df)
+    def singleByte        = roundtrip(factory, df, List(Array[Byte](42)))
+    def highBitBytes      = roundtrip(factory, df, List(Array.tabulate[Byte](256)(i => i.toByte)))
     def randomRecords = prop { (input: (List[Array[Byte]], Int)) =>
-      roundtripProp(cf, df, input._1, input._2)
+      roundtripProp(factory, df, input._1, input._2)
     }.setGen(genRecordsWithTargetSize)
 
     s2"""
@@ -69,10 +73,10 @@ class CompressionRoundtripSpec extends Specification with ScalaCheck {
   """
   }
 
-  private val zstdCompressor = ZstdCompressor.factory(3)
-  private val gzipCompressor = GzipCompressor.factory(6)
-  private val zstdFactory    = new Decompressor.Zstd(Int.MaxValue)
-  private val gzipFactory    = new Decompressor.Gzip(Int.MaxValue)
+  private val zstdCompressor: CompressorFactory = CompressorFactory.zstd(3)
+  private val gzipCompressor: CompressorFactory = CompressorFactory.gzip(6)
+  private val zstdFactory                       = new Decompressor.Zstd(Int.MaxValue)
+  private val gzipFactory                       = new Decompressor.Gzip(Int.MaxValue)
 
   private val multipleRecords = List("first", "second", "third").map(_.getBytes("UTF-8"))
   private val nullByteRecords = List(Array[Byte](0, 0, 0), Array[Byte](1, 0, 2, 0, 3))
@@ -91,7 +95,7 @@ class CompressionRoundtripSpec extends Specification with ScalaCheck {
   }
 
   private val unicodeRecords =
-    List("日本語テスト", "e\u0301 combine\u0301", "emoji: 🎉🚀", "mixed: abc日本語def").map(_.getBytes("UTF-8"))
+    List("日本語テスト", "é combiné", "emoji: 🎉🚀", "mixed: abc日本語def").map(_.getBytes("UTF-8"))
 
   private val genRecord: Gen[Array[Byte]] =
     Gen.chooseNum(1, 1000).flatMap(Gen.listOfN(_, Gen.choose[Byte](Byte.MinValue, Byte.MaxValue))).map(_.toArray)
@@ -100,115 +104,141 @@ class CompressionRoundtripSpec extends Specification with ScalaCheck {
     targetSize <- Gen.chooseNum(100, 10000)
   } yield (records, targetSize)
 
+  // Acquire, run the batch, release — synchronously. Used only inside the ScalaCheck `prop`
+  // combinator below, which needs a plain Boolean rather than an IO.
   private def roundtripProp(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     decompressorFactory: Decompressor.Factory,
     records: List[Array[Byte]],
     targetSize: Int
-  ): Boolean = {
-    val compressor = compressorFactory.buildAndInitialize(targetSize, TestPayloadVersion)
-    val accepted   = records.takeWhile(r => compressor.addRecord(r, 0, r.length))
+  ): Boolean =
+    factory
+      .resource[IO]
+      .use { c =>
+        IO {
+          c.reset(TestPayloadVersion, targetSize)
+          val accepted = records.takeWhile(r => c.addRecord(r, 0, r.length))
+          if (accepted.isEmpty) true
+          else {
+            val compressed = c.result
+            decompressorFactory.build(compressed) match {
+              case Decompressor.FactorySuccess(decompressor, pv) =>
+                val decompressed = drainRecords(decompressor)
+                pv == TestPayloadVersion &&
+                decompressed.length == accepted.length &&
+                decompressed.zip(accepted).forall { case (a, e) => a.sameElements(e) }
+              case _ => false
+            }
+          }
+        }
+      }
+      .unsafeRunSync()
 
-    // If nothing fits, there is no roundtrip
-    if (accepted.isEmpty) return true
-
-    val compressed = compressor.result
-
-    decompressorFactory.build(compressed) match {
-      case Decompressor.FactorySuccess(decompressor, pv) =>
-        val decompressed = drainRecords(decompressor)
-        pv == TestPayloadVersion &&
-        decompressed.length == accepted.length &&
-        decompressed.zip(accepted).forall { case (actual, expected) => actual.sameElements(expected) }
-      case _ => false
+  // Acquire, run the batch, release. Returns the compressed result bytes.
+  private def compress(
+    factory: CompressorFactory,
+    targetSize: Int,
+    records: List[Array[Byte]]
+  ): IO[ByteBuffer] =
+    factory.resource[IO].use { c =>
+      IO {
+        c.reset(TestPayloadVersion, targetSize)
+        records.foreach(r => c.addRecord(r, 0, r.length))
+        c.result
+      }
     }
-  }
 
   // 100KB of repeated bytes compresses very well; targetSize=200000 provides generous headroom
   // to ensure the test exercises large payload handling rather than hitting the size limit
-  private def largePayloadRoundtrip(cf: Compressor.Factory, df: Decompressor.Factory) =
-    roundtrip(cf, df, List(("x" * 100000).getBytes("UTF-8")), targetSize = 200000)
+  private def largePayloadRoundtrip(factory: CompressorFactory, df: Decompressor.Factory) =
+    roundtrip(factory, df, List(("x" * 100000).getBytes("UTF-8")), targetSize = 200000)
 
   private def roundtrip(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     decompressorFactory: Decompressor.Factory,
     records: List[Array[Byte]],
     targetSize: Int = 50000
-  ): MatchResult[Any] = {
-    val compressor = compressorFactory.buildAndInitialize(targetSize, TestPayloadVersion)
-    records.foreach(r => compressor.addRecord(r, 0, r.length))
-    val compressed = compressor.result
+  ): IO[MatchResult[Any]] =
+    compress(factory, targetSize, records).map { compressed =>
+      decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, pv) =>
+        val decompressed = drainRecords(decompressor)
 
-    decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, pv) =>
-      val decompressed = drainRecords(decompressor)
-
-      (pv must beEqualTo(TestPayloadVersion)) and
-        (decompressed.length must beEqualTo(records.length)) and
-        (decompressed.zip(records).forall { case (actual, expected) => actual.sameElements(expected) } must beTrue)
+        (pv must beEqualTo(TestPayloadVersion)) and
+          (decompressed.length must beEqualTo(records.length)) and
+          (decompressed.zip(records).forall { case (actual, expected) => actual.sameElements(expected) } must beTrue)
+      }
     }
-  }
 
   private def payloadVersionRoundtrip(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     decompressorFactory: Decompressor.Factory
-  ): MatchResult[Any] = {
-    val compressor = compressorFactory.buildAndInitialize(1000, TestPayloadVersion)
-    val record     = "test".getBytes("UTF-8")
-    val _          = compressor.addRecord(record, 0, record.length)
-    val compressed = compressor.result
+  ): IO[MatchResult[Any]] =
+    factory.resource[IO].use { c =>
+      IO {
+        c.reset(TestPayloadVersion, 1000)
+        val record     = "test".getBytes("UTF-8")
+        val _          = c.addRecord(record, 0, record.length)
+        val compressed = c.result
 
-    decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, pv) =>
-      decompressor.close()
-      pv must beEqualTo(TestPayloadVersion)
+        decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, pv) =>
+          decompressor.close()
+          pv must beEqualTo(TestPayloadVersion)
+        }
+      }
     }
-  }
 
   private def recordCountRoundtrip(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     decompressorFactory: Decompressor.Factory,
     records: List[Array[Byte]]
-  ): MatchResult[Any] = {
-    val compressor = compressorFactory.buildAndInitialize(50000, TestPayloadVersion)
-    records.foreach(r => compressor.addRecord(r, 0, r.length))
+  ): IO[MatchResult[Any]] =
+    factory.resource[IO].use { c =>
+      IO {
+        c.reset(TestPayloadVersion, 50000)
+        records.foreach(r => c.addRecord(r, 0, r.length))
 
-    val count      = compressor.recordCount
-    val compressed = compressor.result
+        val count      = c.recordCount
+        val compressed = c.result
 
-    decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, _) =>
-      val decompressed = drainRecords(decompressor)
+        decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, _) =>
+          val decompressed = drainRecords(decompressor)
 
-      (count must beEqualTo(records.length)) and
-        (decompressed.length must beEqualTo(count))
+          (count must beEqualTo(records.length)) and
+            (decompressed.length must beEqualTo(count))
+        }
+      }
     }
-  }
 
   private def partialAcceptanceRoundtrip(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     decompressorFactory: Decompressor.Factory
-  ): MatchResult[Any] = {
-    val compressor = compressorFactory.buildAndInitialize(1000, TestPayloadVersion)
-    val small1     = "small1".getBytes("UTF-8")
-    val small2     = "small2".getBytes("UTF-8")
-    val random     = new Random(99)
-    val large      = new Array[Byte](10000)
-    random.nextBytes(large) // random bytes don't compress well
+  ): IO[MatchResult[Any]] =
+    factory.resource[IO].use { c =>
+      IO {
+        c.reset(TestPayloadVersion, 1000)
+        val small1 = "small1".getBytes("UTF-8")
+        val small2 = "small2".getBytes("UTF-8")
+        val random = new Random(99)
+        val large  = new Array[Byte](10000)
+        random.nextBytes(large) // random bytes don't compress well
 
-    val r1         = compressor.addRecord(small1, 0, small1.length)
-    val r2         = compressor.addRecord(small2, 0, small2.length)
-    val r3         = compressor.addRecord(large, 0, large.length)
-    val compressed = compressor.result
+        val r1         = c.addRecord(small1, 0, small1.length)
+        val r2         = c.addRecord(small2, 0, small2.length)
+        val r3         = c.addRecord(large, 0, large.length)
+        val compressed = c.result
 
-    decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, _) =>
-      val decompressed = drainRecords(decompressor)
+        decompressorFactory.build(compressed) must beLike { case Decompressor.FactorySuccess(decompressor, _) =>
+          val decompressed = drainRecords(decompressor)
 
-      (r1 must beTrue) and
-        (r2 must beTrue) and
-        (r3 must beFalse) and
-        (decompressed.length must beEqualTo(2): MatchResult[Any]) and
-        (decompressed(0).sameElements(small1) must beTrue) and
-        (decompressed(1).sameElements(small2) must beTrue)
+          (r1 must beTrue) and
+            (r2 must beTrue) and
+            (r3 must beFalse) and
+            (decompressed.length must beEqualTo(2): MatchResult[Any]) and
+            (decompressed(0).sameElements(small1) must beTrue) and
+            (decompressed(1).sameElements(small2) must beTrue)
+        }
+      }
     }
-  }
 
   @tailrec
   private def drainRecords(decompressor: Decompressor, acc: List[Array[Byte]] = Nil): List[Array[Byte]] =

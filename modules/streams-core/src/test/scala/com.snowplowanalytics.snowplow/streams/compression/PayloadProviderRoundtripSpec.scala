@@ -55,9 +55,9 @@ class PayloadProviderRoundtripSpec extends Specification with CatsEffect with Sc
   private def multipleRecordsGzip = gzipProviderRoundtrip(List("first", "second", "third"))
 
   private def unicodeZstd =
-    zstdProviderRoundtrip(List("日本語テスト", "e\u0301 combine\u0301", "emoji: 🎉🚀", "mixed: abc日本語def"))
+    zstdProviderRoundtrip(List("日本語テスト", "é combiné", "emoji: 🎉🚀", "mixed: abc日本語def"))
   private def unicodeGzip =
-    gzipProviderRoundtrip(List("日本語テスト", "e\u0301 combine\u0301", "emoji: 🎉🚀", "mixed: abc日本語def"))
+    gzipProviderRoundtrip(List("日本語テスト", "é combiné", "emoji: 🎉🚀", "mixed: abc日本語def"))
 
   private def payloadVersionZstd = zstdProviderRoundtrip(List("test"), payloadVersion = 99)
   private def payloadVersionGzip = gzipProviderRoundtrip(List("test"), payloadVersion = 99)
@@ -69,60 +69,78 @@ class PayloadProviderRoundtripSpec extends Specification with CatsEffect with Sc
     val uncompressedPayload = "raw-payload"
     val compressedPayloads  = List("compressed1", "compressed2")
 
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(50000, TestPayloadVersion)
-    compressedPayloads.foreach { s =>
-      val bytes = s.getBytes("UTF-8")
-      compressor.addRecord(bytes, 0, bytes.length)
-    }
-    val compressedBuffer = compressor.result
-
-    val allPayloads = List(ByteBuffer.wrap(uncompressedPayload.getBytes("UTF-8")), compressedBuffer)
-
-    Unique[IO].unique.map(t => TokenedEvents(Chunk.from(allPayloads), t)).flatMap { tokenedEvents =>
-      Stream
-        .emit[IO, TokenedEvents](tokenedEvents)
-        .through(PayloadProvider.pipe(testBadRowProcessor, testConfig, unusedToBadRow))
-        .compile
-        .toList
-        .map { results =>
-          val allPayloadStrings = results.flatMap(_.payloads).map(extractString)
-          val allBad            = results.flatMap(_.bad)
-
-          (allPayloadStrings must containTheSameElementsAs(List(uncompressedPayload) ++ compressedPayloads)) and
-            (allBad must beEmpty)
+    CompressorFactory
+      .zstd(3)
+      .resource[IO]
+      .use { c =>
+        IO {
+          c.reset(TestPayloadVersion, 50000)
+          compressedPayloads.foreach { s =>
+            val bytes = s.getBytes("UTF-8")
+            c.addRecord(bytes, 0, bytes.length)
+          }
+          c.result
         }
-    }
+      }
+      .flatMap { compressedBuffer =>
+        val allPayloads = List(ByteBuffer.wrap(uncompressedPayload.getBytes("UTF-8")), compressedBuffer)
+
+        Unique[IO].unique.map(t => TokenedEvents(Chunk.from(allPayloads), t)).flatMap { tokenedEvents =>
+          Stream
+            .emit[IO, TokenedEvents](tokenedEvents)
+            .through(PayloadProvider.pipe(testBadRowProcessor, testConfig, unusedToBadRow))
+            .compile
+            .toList
+            .map { results =>
+              val allPayloadStrings = results.flatMap(_.payloads).map(extractString)
+              val allBad            = results.flatMap(_.bad)
+
+              (allPayloadStrings must containTheSameElementsAs(List(uncompressedPayload) ++ compressedPayloads)) and
+                (allBad must beEmpty)
+            }
+        }
+      }
   }
 
   private def batchSplitting: IO[MatchResult[Any]] = {
     // 20 records of 300 bytes each = 6000 bytes decompressed, with maxBytesInBatch=2000.
     // This must produce multiple batches. Only the last batch should carry the ack token.
-    val payloads   = (1 to 20).map(_ => "x" * 300).toList
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(50000, TestPayloadVersion)
-    payloads.foreach { s =>
-      val bytes = s.getBytes("UTF-8")
-      compressor.addRecord(bytes, 0, bytes.length)
-    }
-    val compressed  = compressor.result
-    val smallConfig = DecompressionConfig(maxBytesInBatch = 2000, maxBytesSinglePayload = 50000)
+    val payloads = (1 to 20).map(_ => "x" * 300).toList
 
-    Unique[IO].unique.map(t => TokenedEvents(Chunk.singleton(compressed), t)).flatMap { tokenedEvents =>
-      Stream
-        .emit[IO, TokenedEvents](tokenedEvents)
-        .through(PayloadProvider.pipe(testBadRowProcessor, smallConfig, unusedToBadRow))
-        .compile
-        .toList
-        .map { results =>
-          val allPayloads = results.flatMap(_.payloads).map(extractString)
-          val allBad      = results.flatMap(_.bad)
-
-          (results.length must beGreaterThan(1): MatchResult[Any]) and
-            (allPayloads.sorted must beEqualTo(payloads.sorted)) and
-            (allBad must beEmpty) and
-            (results.init.forall(_.ack.isEmpty) must beTrue) and
-            (results.last.ack must beSome)
+    CompressorFactory
+      .zstd(3)
+      .resource[IO]
+      .use { c =>
+        IO {
+          c.reset(TestPayloadVersion, 50000)
+          payloads.foreach { s =>
+            val bytes = s.getBytes("UTF-8")
+            c.addRecord(bytes, 0, bytes.length)
+          }
+          c.result
         }
-    }
+      }
+      .flatMap { compressed =>
+        val smallConfig = DecompressionConfig(maxBytesInBatch = 2000, maxBytesSinglePayload = 50000)
+
+        Unique[IO].unique.map(t => TokenedEvents(Chunk.singleton(compressed), t)).flatMap { tokenedEvents =>
+          Stream
+            .emit[IO, TokenedEvents](tokenedEvents)
+            .through(PayloadProvider.pipe(testBadRowProcessor, smallConfig, unusedToBadRow))
+            .compile
+            .toList
+            .map { results =>
+              val allPayloads = results.flatMap(_.payloads).map(extractString)
+              val allBad      = results.flatMap(_.bad)
+
+              (results.length must beGreaterThan(1): MatchResult[Any]) and
+                (allPayloads.sorted must beEqualTo(payloads.sorted)) and
+                (allBad must beEmpty) and
+                (results.init.forall(_.ack.isEmpty) must beTrue) and
+                (results.last.ack must beSome)
+            }
+        }
+      }
   }
 
   private val genPayload: Gen[String]        = Gen.chooseNum(1, 1000).flatMap(Gen.listOfN(_, Gen.alphaNumChar)).map(_.mkString)
@@ -142,40 +160,46 @@ class PayloadProviderRoundtripSpec extends Specification with CatsEffect with Sc
   private val unusedToBadRow = sentinelDecompressionBadRow(testBadRowProcessor)
 
   private def zstdProviderRoundtrip(payloads: List[String], payloadVersion: Int = TestPayloadVersion) =
-    providerRoundtrip(ZstdCompressor.factory(3), payloads, payloadVersion = payloadVersion)
+    providerRoundtrip(CompressorFactory.zstd(3), payloads, payloadVersion = payloadVersion)
 
   private def gzipProviderRoundtrip(payloads: List[String], payloadVersion: Int = TestPayloadVersion) =
-    providerRoundtrip(GzipCompressor.factory(6), payloads, payloadVersion = payloadVersion)
+    providerRoundtrip(CompressorFactory.gzip(6), payloads, payloadVersion = payloadVersion)
 
   private def providerRoundtrip(
-    compressorFactory: Compressor.Factory,
+    factory: CompressorFactory,
     originalPayloads: List[String],
     payloadVersion: Int
-  ): IO[MatchResult[Any]] = {
-    val compressor = compressorFactory.buildAndInitialize(50000, payloadVersion)
-    originalPayloads.foreach { s =>
-      val bytes = s.getBytes("UTF-8")
-      compressor.addRecord(bytes, 0, bytes.length)
-    }
-    val compressed = compressor.result
-
-    Unique[IO].unique.map(t => TokenedEvents(Chunk.singleton(compressed), t)).flatMap { tokenedEvents =>
-      Stream
-        .emit[IO, TokenedEvents](tokenedEvents)
-        .through(PayloadProvider.pipe(testBadRowProcessor, testConfig, unusedToBadRow))
-        .compile
-        .toList
-        .map { results =>
-          val allPayloads = results.flatMap(_.payloads).map(extractString)
-          val allBad      = results.flatMap(_.bad)
-          val pv          = results.flatMap(_.payloadVersion).headOption
-
-          (allPayloads must containTheSameElementsAs(originalPayloads)) and
-            (allBad must beEmpty) and
-            (pv must beSome(payloadVersion)) and
-            (results.last.ack must beSome(tokenedEvents.ack))
+  ): IO[MatchResult[Any]] =
+    factory
+      .resource[IO]
+      .use { c =>
+        IO {
+          c.reset(payloadVersion, 50000)
+          originalPayloads.foreach { s =>
+            val bytes = s.getBytes("UTF-8")
+            c.addRecord(bytes, 0, bytes.length)
+          }
+          c.result
         }
-    }
-  }
+      }
+      .flatMap { compressed =>
+        Unique[IO].unique.map(t => TokenedEvents(Chunk.singleton(compressed), t)).flatMap { tokenedEvents =>
+          Stream
+            .emit[IO, TokenedEvents](tokenedEvents)
+            .through(PayloadProvider.pipe(testBadRowProcessor, testConfig, unusedToBadRow))
+            .compile
+            .toList
+            .map { results =>
+              val allPayloads = results.flatMap(_.payloads).map(extractString)
+              val allBad      = results.flatMap(_.bad)
+              val pv          = results.flatMap(_.payloadVersion).headOption
+
+              (allPayloads must containTheSameElementsAs(originalPayloads)) and
+                (allBad must beEmpty) and
+                (pv must beSome(payloadVersion)) and
+                (results.last.ack must beSome(tokenedEvents.ack))
+            }
+        }
+      }
 
 }

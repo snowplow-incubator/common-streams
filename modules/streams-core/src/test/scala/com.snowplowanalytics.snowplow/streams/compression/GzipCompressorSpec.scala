@@ -32,9 +32,8 @@ class GzipCompressorSpec extends Specification with CatsEffect {
     produce invalid output when first record is rejected      $g11
   """
 
-  def g1 = {
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
-    val record     = "test-record-g1".getBytes("UTF-8")
+  def g1 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
+    val record = "test-record-g1".getBytes("UTF-8")
 
     val addResult  = compressor.addRecord(record, 0, record.length)
     val compressed = compressor.result
@@ -43,11 +42,10 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(record), factory) must beTrue)
   }
 
-  def g2 = {
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
-    val record1    = "record1".getBytes("UTF-8")
-    val record2    = "record2".getBytes("UTF-8")
-    val record3    = "record3".getBytes("UTF-8")
+  def g2 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
+    val record1 = "record1".getBytes("UTF-8")
+    val record2 = "record2".getBytes("UTF-8")
+    val record3 = "record3".getBytes("UTF-8")
 
     val r1 = compressor.addRecord(record1, 0, record1.length)
     val r2 = compressor.addRecord(record2, 0, record2.length)
@@ -61,15 +59,13 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(record1, record2, record3), factory) must beTrue)
   }
 
-  def g3 = {
-    val compressor  = GzipCompressor.factory(6).buildAndInitialize(30, TestPayloadVersion)
+  def g3 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 30) { compressor =>
     val largeRecord = ("large-record" + "x" * 1000).getBytes("UTF-8")
 
     compressor.addRecord(largeRecord, 0, largeRecord.length) must beFalse
   }
 
-  def g4 = {
-    val compressor     = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
+  def g4 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
     val fullData       = "prefix_test_record_suffix".getBytes("UTF-8")
     val expectedRecord = "test_record".getBytes("UTF-8")
 
@@ -80,8 +76,7 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(expectedRecord), factory) must beTrue)
   }
 
-  def g5 = {
-    val compressor  = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
+  def g5 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
     val emptyRecord = Array.empty[Byte]
 
     val addResult  = compressor.addRecord(emptyRecord, 0, 0)
@@ -91,8 +86,7 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(emptyRecord), factory) must beTrue)
   }
 
-  def g6 = {
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
+  def g6 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
     val record     = "header-test".getBytes("UTF-8")
     val _          = compressor.addRecord(record, 0, record.length)
     val compressed = compressor.result
@@ -103,9 +97,8 @@ class GzipCompressorSpec extends Specification with CatsEffect {
     }
   }
 
-  def g7 = {
+  def g7 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 35) { compressor =>
     // Test boundary case: use a record that compresses to exactly the target size
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(35, TestPayloadVersion)
 
     // The string "abc" (3 bytes) compresses to exactly 35 bytes total:
     // - 2 bytes: compression format headers (1 + 1)
@@ -128,9 +121,8 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (compressedSize must_== 35)
   }
 
-  def g8 = {
+  def g8 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 35) { compressor =>
     // Test one-over boundary case: use a record that compresses to one byte over target size
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(35, TestPayloadVersion)
 
     // The string "abcd" (4 bytes) compresses to exactly 36 bytes total (one over target):
     val overTargetRecord = "abcd".getBytes("UTF-8")
@@ -138,9 +130,7 @@ class GzipCompressorSpec extends Specification with CatsEffect {
     compressor.addRecord(overTargetRecord, 0, overTargetRecord.length) must beFalse // Should be rejected as it exceeds target size
   }
 
-  def g9 = {
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(50000, TestPayloadVersion)
-
+  def g9 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 50000) { compressor =>
     // Create a genuinely large record (5KB of data)
     val record = ("x" * 5000).getBytes("UTF-8")
 
@@ -154,8 +144,7 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       ((compressedSize < record.length) must beTrue)
   }
 
-  def g10 = {
-    val compressor = GzipCompressor.factory(6).buildAndInitialize(1000, TestPayloadVersion)
+  def g10 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
     val compressed = compressor.result
 
     val bytes = new Array[Byte](compressed.remaining())
@@ -175,8 +164,7 @@ class GzipCompressorSpec extends Specification with CatsEffect {
       (bytes must beEqualTo(expected))
   }
 
-  def g11 = {
-    val compressor  = GzipCompressor.factory(6).buildAndInitialize(10, TestPayloadVersion)
+  def g11 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 10) { compressor =>
     val largeRecord = new Array[Byte](10000)
 
     val isAdded = compressor.addRecord(largeRecord, 0, largeRecord.length)

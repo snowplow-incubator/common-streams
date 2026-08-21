@@ -9,6 +9,7 @@
 package com.snowplowanalytics.snowplow.streams.compression
 
 import cats.data.NonEmptyList
+import cats.effect.IO
 
 import com.github.luben.zstd.ZstdOutputStream
 
@@ -25,6 +26,21 @@ import scala.annotation.tailrec
 object CompressionTestUtils {
 
   val TestPayloadVersion = 42
+
+  /**
+   * Acquire a Compressor, run one batch against it at the given `targetSize`, and release it.
+   *
+   * Returns `IO[A]`, to be run by the specs2 `CatsEffect` trait mixed into the spec — callers
+   * should not need to `unsafeRunSync()` this themselves.
+   */
+  def withCompressor[A](
+    factory: CompressorFactory,
+    payloadVersion: Int,
+    targetSize: Int
+  )(
+    f: Compressor => A
+  ): IO[A] =
+    factory.resource[IO].use(c => IO { c.reset(payloadVersion, targetSize); f(c) })
 
   sealed trait CompressionType
   object CompressionType {

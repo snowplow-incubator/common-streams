@@ -36,6 +36,25 @@ private[compression] class RewindableOutputStream(targetSize: Int) extends ByteA
   def rewindToMark(): Unit =
     count = marker
 
+  /**
+   * Append the remaining bytes of a (possibly direct) ByteBuffer, draining it. This is our own
+   * helper (used by the zstd engine to drain its direct staging buffer), not part of the
+   * OutputStream contract. Once we are over target we skip the copy because these bytes are
+   * destined to be rewound, but we still advance `count` so the caller's size check fires. `buf` is
+   * pre-sized to `targetSize` and committed output never exceeds it, so no growth is ever needed
+   * here.
+   */
+  private[compression] def append(src: ByteBuffer): Unit = {
+    val len = src.remaining()
+    if (count + len > targetSize) {
+      count += len
+      val _ = src.position(src.limit())
+    } else {
+      src.get(buf, count, len)
+      count += len
+    }
+  }
+
   override def write(
     b: Array[Byte],
     off: Int,

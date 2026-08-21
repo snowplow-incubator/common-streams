@@ -32,9 +32,8 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
     produce invalid stream when first record is rejected      $z11
   """
 
-  def z1 = {
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
-    val record     = "test-record-z1".getBytes("UTF-8")
+  def z1 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
+    val record = "test-record-z1".getBytes("UTF-8")
 
     val addResult  = compressor.addRecord(record, 0, record.length)
     val compressed = compressor.result
@@ -43,11 +42,10 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(record), factory) must beTrue)
   }
 
-  def z2 = {
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
-    val record1    = "record1".getBytes("UTF-8")
-    val record2    = "record2".getBytes("UTF-8")
-    val record3    = "record3".getBytes("UTF-8")
+  def z2 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
+    val record1 = "record1".getBytes("UTF-8")
+    val record2 = "record2".getBytes("UTF-8")
+    val record3 = "record3".getBytes("UTF-8")
 
     val r1 = compressor.addRecord(record1, 0, record1.length)
     val r2 = compressor.addRecord(record2, 0, record2.length)
@@ -61,15 +59,13 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(record1, record2, record3), factory) must beTrue)
   }
 
-  def z3 = {
-    val compressor  = ZstdCompressor.factory(3).buildAndInitialize(20, TestPayloadVersion)
+  def z3 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 20) { compressor =>
     val largeRecord = ("large-record" + "x" * 1000).getBytes("UTF-8")
 
     compressor.addRecord(largeRecord, 0, largeRecord.length) must beFalse
   }
 
-  def z4 = {
-    val compressor     = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
+  def z4 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
     val fullData       = "prefix_test_record_suffix".getBytes("UTF-8")
     val expectedRecord = "test_record".getBytes("UTF-8")
 
@@ -80,8 +76,7 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(expectedRecord), factory) must beTrue)
   }
 
-  def z5 = {
-    val compressor  = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
+  def z5 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
     val emptyRecord = Array.empty[Byte]
 
     val addResult  = compressor.addRecord(emptyRecord, 0, 0)
@@ -91,8 +86,7 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (verifyFormat(compressed, List(emptyRecord), factory) must beTrue)
   }
 
-  def z6 = {
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
+  def z6 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
     val record     = "header-test".getBytes("UTF-8")
     val _          = compressor.addRecord(record, 0, record.length)
     val compressed = compressor.result
@@ -103,9 +97,8 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
     }
   }
 
-  def z7 = {
+  def z7 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 21) { compressor =>
     // Test boundary case: use a record that compresses to exactly the target size
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(21, TestPayloadVersion)
 
     // The string "abc" (3 bytes) compresses to exactly 21 bytes total with Zstd:
     // - 2 bytes: compression format headers (1 + 1)
@@ -128,9 +121,8 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (compressedSize must_== 21)
   }
 
-  def z8 = {
+  def z8 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 21) { compressor =>
     // Test one-over boundary case: use a record that compresses to one byte over target size
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(21, TestPayloadVersion)
 
     // The string "abcd" (4 bytes) compresses to exactly 22 bytes total (one over target):
     val overTargetRecord = "abcd".getBytes("UTF-8")
@@ -138,9 +130,7 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
     compressor.addRecord(overTargetRecord, 0, overTargetRecord.length) must beFalse // Should be rejected as it exceeds target size
   }
 
-  def z9 = {
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(50000, TestPayloadVersion)
-
+  def z9 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 50000) { compressor =>
     // Create a genuinely large record (5KB of data)
     val record = ("x" * 5000).getBytes("UTF-8")
 
@@ -154,8 +144,7 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       ((compressedSize < record.length) must beTrue)
   }
 
-  def z10 = {
-    val compressor = ZstdCompressor.factory(3).buildAndInitialize(1000, TestPayloadVersion)
+  def z10 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
     val compressed = compressor.result
 
     val bytes = new Array[Byte](compressed.remaining())
@@ -171,8 +160,7 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
       (bytes must beEqualTo(expected))
   }
 
-  def z11 = {
-    val compressor  = ZstdCompressor.factory(3).buildAndInitialize(20, TestPayloadVersion)
+  def z11 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 20) { compressor =>
     val largeRecord = new Array[Byte](10000)
 
     val isAdded    = compressor.addRecord(largeRecord, 0, largeRecord.length)
