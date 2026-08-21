@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  define-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      scala-versions: ${{ steps.versions.outputs.scala-versions }}
+      scala-default: ${{ steps.versions.outputs.scala-default }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Scala versions from the build
+        id: versions
+        run: |
+          scala212=$(sed -n 's/.*scala212 = "\(.*\)".*/\1/p' project/BuildSettings.scala)
+          scala213=$(sed -n 's/.*scala213 = "\(.*\)".*/\1/p' project/BuildSettings.scala)
+          if [ -z "$scala212" ] || [ -z "$scala213" ]; then
+            echo "Failed to read Scala versions from project/BuildSettings.scala" >&2
+            exit 1
+          fi
+          echo "scala-versions=$(printf '%s\n%s\n' "$scala212" "$scala213" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "scala-default=$scala213" >> "$GITHUB_OUTPUT"
+
+  check_fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install sbt
+        uses: sbt/setup-sbt@v1
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - name: Check Scala formatting
+        run: sbt scalafmtSbtCheck scalafmtCheckAll
+
+  unit:
+    needs: define-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scala: ${{ fromJSON(needs.define-matrix.outputs.scala-versions) }}
+    steps:
+      - name: Install sbt
+        uses: sbt/setup-sbt@v1
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+
+      # Restore compiled classes + zinc incremental analysis so this run does an
+      # incremental compile of the diff since the cached commit instead of a cold
+      # full compile. Keyed per Scala version so the matrix legs don't collide;
+      # the exact-sha key plus the prefix restore-key fall back to the most recent
+      # prior cache for this version. This job is the sole writer for its version.
+      - name: Restore sbt compiled output (zinc + target)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            **/target
+          key: sbt-target-${{ runner.os }}-${{ matrix.scala }}-${{ github.sha }}
+          restore-keys: |
+            sbt-target-${{ runner.os }}-${{ matrix.scala }}-
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - name: Run unit tests (Scala ${{ matrix.scala }})
+        run: sbt ++${{ matrix.scala }} unitTest
+      - name: Check assets can be published (Scala ${{ matrix.scala }})
+        run: sbt ++${{ matrix.scala }} publishLocal
+
+      # Save even when a test failed: compilation still succeeded, so the next run
+      # should still get a warm incremental cache.
+      - name: Save sbt compiled output (zinc + target)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            **/target
+          key: sbt-target-${{ runner.os }}-${{ matrix.scala }}-${{ github.sha }}
+
+  integration:
+    needs: define-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [it, it3]
+    steps:
+      - name: Install sbt
+        uses: sbt/setup-sbt@v1
+      - uses: actions/checkout@v4
+      - uses: coursier/cache-action@v6
+
+      # Restore the unit job's Scala 2.13 compiled output read-only, so common
+      # modules (streams-core, kinesis/kinesis3, runtime-common) are warm and only
+      # the small it/it3 module compiles cold.
+      - name: Restore sbt compiled output (zinc + target)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            **/target
+          key: sbt-target-${{ runner.os }}-${{ needs.define-matrix.outputs.scala-default }}-${{ github.sha }}
+          restore-keys: |
+            sbt-target-${{ runner.os }}-${{ needs.define-matrix.outputs.scala-default }}-
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+
+      - name: Cache StatsD image
+        uses: actions/cache@v4
+        id: statsd-cache
+        with:
+          path: /tmp/docker-images/statsd.tar
+          key: docker-${{ runner.os }}-statsd-v0.10.1
+
+      - name: Load cached StatsD image
+        if: steps.statsd-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-images/statsd.tar
+
+      - name: Pull and cache StatsD image
+        if: steps.statsd-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-images
+          docker pull dblworks/statsd:v0.10.1
+          docker save dblworks/statsd:v0.10.1 -o /tmp/docker-images/statsd.tar
+
+      - name: Cache LocalStack image
+        uses: actions/cache@v4
+        id: localstack-cache
+        with:
+          path: /tmp/docker-images/localstack.tar
+          key: docker-${{ runner.os }}-localstack-2.3.2
+
+      - name: Load cached LocalStack image
+        if: steps.localstack-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-images/localstack.tar
+
+      - name: Pull and cache LocalStack image
+        if: steps.localstack-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-images
+          docker pull localstack/localstack:2.3.2
+          docker save localstack/localstack:2.3.2 -o /tmp/docker-images/localstack.tar
+
+      - name: Run integration tests (${{ matrix.module }})
+        run: env TESTCONTAINERS_RYUK_DISABLED=true sbt ${{ matrix.module }}/test

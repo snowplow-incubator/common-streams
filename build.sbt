@@ -8,20 +8,24 @@ import com.typesafe.sbt.site.util.SiteHelpers
  * You may obtain a copy of the Snowplow Community License Version 1.0 at https://docs.snowplow.io/community-license-1.0
  */
 
+// Scala version is a build-wide fact, defined once here so every project shares it.
+ThisBuild / scalaVersion := BuildSettings.scala213
+ThisBuild / crossScalaVersions := List(BuildSettings.scala212, BuildSettings.scala213)
+
+// All except the integration modules.
+lazy val unitModules: List[Project] =
+  List(streams, kinesis, kinesis3, kafka, pubsub, nsq, runtimeCommon, loadersCommon)
+
 lazy val root = project
   .in(file("."))
-  .aggregate(
-    streams,
-    kinesis,
-    kinesis3,
-    kafka,
-    pubsub,
-    nsq,
-    runtimeCommon,
-    loadersCommon,
-    IT,
-    IT3
-  )
+  .aggregate((unitModules :+ IT :+ IT3).map(p => p: ProjectReference): _*)
+
+// The unit CI job runs this as a single sbt process, separate from the
+// integration tests, so the two run in parallel rather than serially.
+addCommandAlias(
+  "unitTest",
+  unitModules.map(p => s"${p.id}/test").mkString(";", ";", "")
+)
 
 lazy val streams: Project = project
   .settings(

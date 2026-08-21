@@ -1,3 +1,8 @@
+Version 0.24.2 (2026-07-02)
+--------------------------
+Speed up CI with parallel jobs and compiled-output cache (#42)
+Bump schema-ddl to 0.27.1 (#43)
+
 Version 0.24.1 (2026-05-08)
 --------------------------
 Do not report gauge and timer metrics that have not been updated since last report (#39)

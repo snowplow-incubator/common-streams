@@ -31,12 +31,10 @@ import com.snowplowanalytics.snowplow.sbt.IgluSchemaPlugin.autoImport._
 object BuildSettings {
 
   lazy val scala212 = "2.12.20"
-  lazy val scala213 = "2.13.16"
+  lazy val scala213 = "2.13.18"
 
   lazy val buildSettings = Seq(
     organization := "com.snowplowanalytics",
-    scalaVersion := scala213,
-    crossScalaVersions := List(scala212, scala213),
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
     scalacOptions ++= scalacOptionsVersion(scalaVersion.value),

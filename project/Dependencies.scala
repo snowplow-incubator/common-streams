@@ -23,7 +23,7 @@ object Dependencies {
     val circeExtra       = "0.14.4"
     val circeConfig      = "0.10.2"
     val betterMonadicFor = "0.3.1"
-    val kindProjector    = "0.13.3"
+    val kindProjector    = "0.13.4"
     val collectionCompat = "2.11.0"
 
     // Streams
@@ -43,7 +43,7 @@ object Dependencies {
     val zstd       = "1.5.7-4"
 
     // Snowplow
-    val schemaDdl    = "0.26.0"
+    val schemaDdl    = "0.27.1"
     val badrows      = "2.3.0"
     val igluClient   = "4.0.0"
     val analyticsSdk = "3.2.2"
