@@ -491,17 +491,19 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
         Action.Checkpointed(List("1", "2", "3", "4")),
         Action.ProcessorStartedWindow("1970-01-01T00:01:40Z"),
         Action.ProcessorReceivedEvents("1970-01-01T00:01:40Z", List("21", "22")),
-        Action.ProcessorReceivedEvents("1970-01-01T00:01:48Z", List("23", "24")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:41Z", List("23", "24")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:42Z", List("25", "26")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:48Z", List("27", "28")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:50Z"),
         Action.Checkpointed(List("5", "6", "7", "8")),
         Action.ProcessorStartedWindow("1970-01-01T00:01:56Z"),
-        Action.ProcessorReceivedEvents("1970-01-01T00:01:56Z", List("25", "26")),
+        Action.ProcessorReceivedEvents("1970-01-01T00:01:56Z", List("29", "30")),
         Action.ProcessorReachedEndOfWindow("1970-01-01T00:01:58Z"),
         Action.Checkpointed(List("9", "10", "11", "12")),
         Action.Checkpointed(List("13", "14", "15", "16")),
         Action.Checkpointed(List("17", "18", "19", "20")),
-        Action.Checkpointed(List("21", "22", "23", "24")),
-        Action.Checkpointed(List("25", "26"))
+        Action.Checkpointed(List("21", "22", "23", "24", "25", "26", "27", "28")),
+        Action.Checkpointed(List("29", "30"))
       )
     )
 

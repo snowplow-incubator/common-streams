@@ -12,12 +12,12 @@ object Dependencies {
   object V {
     // Scala
     val cats             = "2.13.0"
-    val catsEffect       = "3.6.3"
+    val catsEffect       = "3.7.0"
     val catsRetry        = "3.1.3"
-    val fs2              = "3.12.2"
+    val fs2              = "3.13.0"
     val log4cats         = "2.7.1"
-    val http4s           = "0.23.31"
-    val blaze            = "0.23.17"
+    val http4s           = "0.23.36"
+    val blaze            = "0.23.18"
     val decline          = "2.4.1"
     val circe            = "0.14.14"
     val circeExtra       = "0.14.4"
@@ -43,9 +43,9 @@ object Dependencies {
     val zstd       = "1.5.7-4"
 
     // Snowplow
-    val schemaDdl    = "0.27.2"
+    val schemaDdl    = "0.28.0"
     val badrows      = "2.3.0"
-    val igluClient   = "4.0.0"
+    val igluClient   = "4.2.1"
     val analyticsSdk = "3.2.2"
 
     // tests
