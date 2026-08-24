@@ -9,7 +9,7 @@ package com.snowplowanalytics.snowplow.streams.kafka.sink
 
 import cats.implicits._
 import cats.effect.{Async, Resource, Sync}
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
+import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerRecord}
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSerializer}
 import org.typelevel.log4cats.Logger
@@ -32,6 +32,16 @@ private[kafka] object KafkaSink {
   ): Resource[F, Sink[F]] =
     for {
       producer <- makeProducer(config, authHandlerClass)
+      ec1      <- createExecutionContext
+      ec2      <- createExecutionContext
+    } yield impl(config, producer, ec1, ec2)
+
+  // Visible to tests so they can inject a mock producer without a real broker
+  private[kafka] def resourceWithProducer[F[_]: Async](
+    config: KafkaSinkConfig,
+    producer: Producer[String, Array[Byte]]
+  ): Resource[F, Sink[F]] =
+    for {
       ec1 <- createExecutionContext
       ec2 <- createExecutionContext
     } yield impl(config, producer, ec1, ec2)
@@ -41,12 +51,12 @@ private[kafka] object KafkaSink {
   private def makeProducer[F[_]: Async](
     config: KafkaSinkConfig,
     authHandlerClass: String
-  ): Resource[F, KafkaProducer[String, Array[Byte]]] = {
+  ): Resource[F, Producer[String, Array[Byte]]] = {
     val producerSettings = Map(
-      "bootstrap.servers" -> config.bootstrapServers,
+      "bootstrap.servers"                -> config.bootstrapServers,
       "sasl.login.callback.handler.class" -> authHandlerClass,
-      "key.serializer" -> classOf[StringSerializer].getName,
-      "value.serializer" -> classOf[ByteArraySerializer].getName
+      "key.serializer"                   -> classOf[StringSerializer].getName,
+      "value.serializer"                 -> classOf[ByteArraySerializer].getName
     ) ++ config.producerConf
     val make = Sync[F].delay {
       new KafkaProducer[String, Array[Byte]]((producerSettings: Map[String, AnyRef]).asJava)
@@ -56,7 +66,7 @@ private[kafka] object KafkaSink {
 
   private def impl[F[_]: Async](
     config: KafkaSinkConfig,
-    producer: KafkaProducer[String, Array[Byte]],
+    producer: Producer[String, Array[Byte]],
     ecForSend: ExecutionContext,
     ecForWait: ExecutionContext
   ): Sink[F] =
@@ -69,8 +79,15 @@ private[kafka] object KafkaSink {
           }.toIndexedSeq
         }
         Async[F].evalOn(futures, ecForSend).flatMap { fs =>
-          val await = Sync[F].delay {
-            fs.foreach(_.get)
+          val await = Sync[F].blocking {
+            fs.foreach { f =>
+              try f.get()
+              catch {
+                case e: InterruptedException =>
+                  Thread.currentThread().interrupt()
+                  throw e
+              }
+            }
           }
           Async[F].evalOn(await, ecForWait)
         }
@@ -93,14 +110,12 @@ private[kafka] object KafkaSink {
     }
 
   private def toProducerRecord(config: KafkaSinkConfig, sinkable: Sinkable): ProducerRecord[String, Array[Byte]] = {
-
     val headers = sinkable.attributes.map { case (k, v) =>
       new Header {
         def key: String        = k
         def value: Array[Byte] = v.getBytes(StandardCharsets.UTF_8)
       }
     }
-
     new ProducerRecord(config.topicName, null, sinkable.partitionKey.getOrElse(UUID.randomUUID.toString), sinkable.bytes, headers.asJava)
   }
 
