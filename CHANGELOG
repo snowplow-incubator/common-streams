@@ -1,3 +1,9 @@
+Version 0.26.1 (2026-09-02)
+--------------------------
+Bump dependencies for 0.26.1 release (#54)
+Avoid cats sequence when transforming entity columns (#53)
+Move private-to-public sync to the centralized workflow (#52)
+
 Version 0.26.0 (2026-08-04)
 --------------------------
 Bump dependencies to fix CVEs (#49)

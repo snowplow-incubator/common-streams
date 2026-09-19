@@ -90,6 +90,8 @@ class TransformStructuredSpec extends Specification {
       JSON null on output for contexts column if no data matching type is provided $contextsNoData
       JSON null on output for unstruct column if no sub-version matching data exists in a batch $unstructNoMatchingSubVersion
       JSON null on output for contexts column if no sub-version matching data exists in a batch $contextNoMatchingSubVersion
+      Entity columns are emitted in batch order, with recovery columns following their merged column $entityColumnOrder
+      JSON null on output for a recovery column if the event does not carry its sub-version $recoveryColumnNoMatchingSubVersion
    
     Failures:
       Atomic currency field cannot be cast to a decimal due to rounding $atomicTooManyDecimalPoints
@@ -101,6 +103,9 @@ class TransformStructuredSpec extends Specification {
       Cast error for unstruct (integer passed in string field) $unstructWrongType
       Cast error for context (integer passed in string field) $contextWrongType
       Iglu error in batch info becomes iglu transformation error $igluErrorInBatchInfo
+      All failing entity columns are reported, in column order $multipleEntityErrors
+      Error for a recovery column reports its own sub-version $recoveryColumnErrorUsesOwnSubVersion
+      Error for a merged column reports the highest sub-version in the batch $mergedColumnErrorUsesMaxSubVersion
   """
 
   def onlyAtomic = {
@@ -581,6 +586,159 @@ class TransformStructuredSpec extends Specification {
     assertLoaderError(inputEvent, batchInfo, expectedErrors = List(igluResolutionError))
   }
 
+  def entityColumnOrder = {
+    val inputEvent = createEvent(
+      unstruct = Some(sdj(data = json"""{ "my_string": "from-recovered-1-0-1"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-1")),
+      contexts = List(sdj(data = json"""{ "my_string": "from-context"}""", key = "iglu:com.example/mySchema/jsonschema/2-0-0"))
+    )
+
+    // Deliberately in no sorted order: the output columns must follow this Vector exactly, one
+    // value per Field, because a loader building its table schema expands the same Vector the same
+    // way and then matches values to columns positionally.
+    val batchInfo = Result(
+      fields = Vector(
+        mySchemaContexts(model = 2, subVersions = Set((0, 0))),
+        mySchemaUnstruct(
+          model       = 1,
+          subVersions = Set((0, 0)),
+          recoveries = List(
+            (0, 1) -> recoveredUnstructField(model = 1, subVersion = (0, 1)),
+            (0, 2) -> recoveredUnstructField(model = 1, subVersion = (0, 2))
+          )
+        ),
+        mySchemaUnstruct(model = 3, subVersions = Set((0, 0)))
+      ),
+      igluFailures = List.empty
+    )
+
+    val expectedNames = batchInfo.fields.flatMap(tte => tte.mergedField.name :: tte.recoveries.map(_._2.name))
+
+    val expectedValues = Vector(
+      json"""[{ "_schema_version": "2-0-0", "my_string": "from-context"}]""",
+      Json.Null, // the unstruct event is 1-0-1, which is not one of the merged sub-versions
+      json"""{ "my_string": "from-recovered-1-0-1"}""",
+      Json.Null,
+      Json.Null
+    )
+
+    val result = Transform.transformEvent[Json](BadRowProcessor("test-loader", "0.0.0"), TestCaster, inputEvent, batchInfo)
+
+    result must beRight { actualValues: Vector[NamedValue[Json]] =>
+      val entityColumns = actualValues.drop(AtomicFields.static.size) // atomic fields come first
+
+      val assertNames: MatchResult[Any]  = entityColumns.map(_.name) must beEqualTo(expectedNames)
+      val assertValues: MatchResult[Any] = entityColumns.map(_.value) must beEqualTo(expectedValues)
+
+      assertNames and assertValues
+    }
+  }
+
+  def recoveryColumnNoMatchingSubVersion = {
+    val inputEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+
+    val batchInfo = Result(
+      fields = Vector(
+        mySchemaUnstruct(
+          model       = 1,
+          subVersions = Set((0, 0)),
+          recoveries  = List((0, 1) -> recoveredUnstructField(model = 1, subVersion = (0, 1)))
+        )
+      ),
+      igluFailures = List.empty
+    )
+
+    // A recovery column matches only the sub-version it was built for, never the merged sub-versions
+    val expectedOutput = List(
+      NamedValue(name = "unstruct_event_com_example_my_schema_1", value                          = json"""{ "my_string": "abc"}"""),
+      NamedValue(name = "unstruct_event_com_example_my_schema_1_recovered_1_0_1_deadbeef", value = Json.Null)
+    )
+
+    assertSuccessful(inputEvent, batchInfo, expectedAllEntities = expectedOutput)
+  }
+
+  def multipleEntityErrors = {
+    val inputEvent = createEvent(
+      unstruct = Some(sdj(data = json"""{ "my_string": 123}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")),
+      contexts = List(sdj(data = json"""{ "my_string": 456}""", key = "iglu:com.example/mySchema/jsonschema/2-0-0"))
+    )
+
+    val batchInfo = Result(
+      fields = Vector(
+        mySchemaContexts(model = 2, subVersions = Set((0, 0))),
+        mySchemaUnstruct(model = 1, subVersions = Set((0, 0)))
+      ),
+      igluFailures = List.empty
+    )
+
+    // Every failing column must be reported, in column order
+    val expectedErrors = List(
+      FailureDetails.LoaderIgluError.WrongType(
+        SchemaKey("com.example", "mySchema", "jsonschema", Full(2, 0, 0)),
+        value    = json"456",
+        expected = "String"
+      ),
+      FailureDetails.LoaderIgluError.WrongType(
+        SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 0)),
+        value    = json"123",
+        expected = "String"
+      )
+    )
+
+    val result = Transform.transformEvent(BadRowProcessor("loader", "0.0.0"), TestCaster, inputEvent, batchInfo)
+
+    // Deliberately not the assertLoaderError helper: this compares in order, because error order is
+    // exactly what this test exists to pin. Do not relax it to containTheSameElementsAs.
+    result must beLeft.like { case BadRow.LoaderIgluError(_, Failure.LoaderIgluErrors(errors), _) =>
+      errors.toList must beEqualTo(expectedErrors)
+    }
+  }
+
+  def recoveryColumnErrorUsesOwnSubVersion = {
+    val inputEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "my_string": 123}""", key = "iglu:com.example/mySchema/jsonschema/1-0-1")))
+
+    val batchInfo = Result(
+      fields = Vector(
+        mySchemaUnstruct(
+          model       = 1,
+          subVersions = Set((0, 0)),
+          recoveries  = List((0, 1) -> recoveredUnstructField(model = 1, subVersion = (0, 1)))
+        )
+      ),
+      igluFailures = List.empty
+    )
+
+    // The merged column has no matching sub-version so it is null. Only the recovery column fails,
+    // and it reports the sub-version it was built for, not the merged sub-versions.
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
+      SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 1)),
+      value    = json"123",
+      expected = "String"
+    )
+
+    assertLoaderError(inputEvent, batchInfo, List(expectedError))
+  }
+
+  def mergedColumnErrorUsesMaxSubVersion = {
+    val inputEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "my_string": 123}""", key = "iglu:com.example/mySchema/jsonschema/1-0-0")))
+
+    val batchInfo = Result(
+      fields       = Vector(mySchemaUnstruct(model = 1, subVersions = Set((0, 0), (1, 0)))),
+      igluFailures = List.empty
+    )
+
+    // The schema key in the error is built from the highest sub-version merged into the column
+    val expectedError = FailureDetails.LoaderIgluError.WrongType(
+      SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 1, 0)),
+      value    = json"123",
+      expected = "String"
+    )
+
+    assertLoaderError(inputEvent, batchInfo, List(expectedError))
+  }
+
   private def assertSuccessful(
     event: Event,
     batchInfo: Result,
@@ -598,6 +756,9 @@ class TransformStructuredSpec extends Specification {
       val assertNotExist: MatchResult[Any]      = actualFieldNames must not(containAnyOf(shouldNotExist))
       val noDuplicates: MatchResult[Any]        = actualFieldNames.distinct.size must beEqualTo(actualFieldNames.size)
       val totalNumberOfFields: MatchResult[Any] =
+        // 128 is deliberately a literal, not AtomicFields.static.size: it is the atomic column count
+        // that loaders depend on, and deriving it from the same source as the code under test would
+        // let an added or removed atomic column pass unnoticed.
         actualFieldNames.size must beEqualTo(128 + expectedAllEntities.size) // atomic + entities only
 
       assertAtomicExist and assertEntitiesExist and assertNotExist and noDuplicates and totalNumberOfFields
@@ -628,13 +789,31 @@ class TransformStructuredSpec extends Specification {
   private def mySchemaUnstruct(
     model: Int,
     subVersions: Set[SchemaSubVersion],
-    ddl: NonEmptyVector[Field] = simpleOneFieldSchema
+    ddl: NonEmptyVector[Field]                  = simpleOneFieldSchema,
+    recoveries: List[(SchemaSubVersion, Field)] = Nil
   ) = TypedTabledEntity(
     tabledEntity   = TabledEntity(TabledEntity.UnstructEvent, "com.example", "mySchema", model),
     mergedField    = Field(s"unstruct_event_com_example_my_schema_$model", Type.Struct(ddl), Nullable, Set.empty),
     mergedVersions = subVersions,
-    recoveries     = Nil
+    recoveries     = recoveries
   )
+
+  /**
+   * A recovery column, named in the shape TypedTabledEntity.build produces, with a stand-in hash
+   */
+  private def recoveredUnstructField(
+    model: Int,
+    subVersion: SchemaSubVersion,
+    ddl: NonEmptyVector[Field] = simpleOneFieldSchema
+  ): Field = {
+    val (revision, addition) = subVersion
+    Field(
+      s"unstruct_event_com_example_my_schema_${model}_recovered_${model}_${revision}_${addition}_deadbeef",
+      Type.Struct(ddl),
+      Nullable,
+      Set.empty
+    )
+  }
 
   private def mySchemaContexts(
     model: Int,

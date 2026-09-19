@@ -144,18 +144,34 @@ object Transform {
     }
   }
 
+  /**
+   * Cast every entity column of an event
+   *
+   * `entities` is the authority on column order, and consumers respect it: a loader building its
+   * table schema walks the same Vector, so reordering it moves both sides together. What this
+   * method must get right on its own is the expansion of each entity into columns - merged column
+   * first, then that entity's recoveries - and that the expansion is total: exactly one value per
+   * Field reachable from `entities`, never skipped, never added to. Consumers may match values to
+   * columns positionally, discarding `NamedValue.name` - snowplow-lake-loader builds a Spark `Row`
+   * this way - so dropping a null column here would shift every later value into the wrong column.
+   *
+   * Results are combined by [[accumulateValidated]] rather than by `.sequence`, for the reasons
+   * given there. Either way, the errors of *every* failing column are reported, in column order.
+   */
   private def forEntities[A](
     caster: Caster[A],
     event: Event,
     entities: Vector[TypedTabledEntity]
   ): ValidatedNel[FailureDetails.LoaderIgluError, Vector[Caster.NamedValue[A]]] =
-    entities.flatMap { case TypedTabledEntity(entity, field, subVersions, recoveries) =>
-      val head = forEntity(caster, entity, field, subVersions, event)
-      val tail = recoveries.map { case (recoveryVersion, recoveryField) =>
-        forEntity(caster, entity, recoveryField, Set(recoveryVersion), event)
+    accumulateValidated { emit =>
+      entities.foreach { case TypedTabledEntity(entity, field, subVersions, recoveries) =>
+        emit(forEntity(caster, entity, field, subVersions, event))
+        // Recoveries are ordinary output columns which happen to carry a single sub-version
+        recoveries.foreach { case (recoveryVersion, recoveryField) =>
+          emit(forEntity(caster, entity, recoveryField, Set(recoveryVersion), event))
+        }
       }
-      head :: tail
-    }.sequence
+    }
 
   private def forEntity[A](
     caster: Caster[A],
@@ -392,6 +408,46 @@ object Transform {
           Caster.NamedValue(field.name, value)
         }
     }.leftMap(castErrorToLoaderIgluError(AtomicFields.schemaKey, _))
+
+  /**
+   * Runs `build`, which emits one `Validated` result at a time, and combines them
+   *
+   * Nothing short-circuits, so `build` must emit a result for every item even once one of them has
+   * failed. It must also emit synchronously, and must not retain the callback it is passed: the
+   * results are read as soon as `build` returns, so an emission deferred into an `Eval`, an `IO` or
+   * a `Ref` would simply be dropped, silently shifting every subsequent value.
+   *
+   * This exists in order to avoid `.sequence`, which was the single largest allocation site in the
+   * lake loader. `.sequence` over a `Vector[ValidatedNel[E, A]]` routes through
+   * `cats.data.Chain.traverseViaChain`, which builds an `Eval` chain spanning the whole vector, on
+   * top of the intermediate collection needed to hold the results in the first place. Both are
+   * O(results).
+   *
+   * The builders are this method's own mutable state. They do not escape it, and callers see only
+   * the `Validated` that comes back.
+   *
+   * @return
+   *   the emitted values, in emission order, if they all succeeded; otherwise every error, also in
+   *   emission order
+   */
+  private def accumulateValidated[E, A](build: (ValidatedNel[E, A] => Unit) => Unit): ValidatedNel[E, Vector[A]] = {
+    val values = Vector.newBuilder[A]
+    val errors = List.newBuilder[E]
+
+    build {
+      case Validated.Valid(value) =>
+        values += value
+        ()
+      case Validated.Invalid(failures) =>
+        errors ++= failures.toList
+        ()
+    }
+
+    NonEmptyList.fromList(errors.result()) match {
+      case None      => Validated.Valid(values.result())
+      case Some(nel) => Validated.Invalid(nel)
+    }
+  }
 
   private val monetaryPrecision: Int = Type.DecimalPrecision.toInt(AtomicFields.monetaryDecimal.precision)
 
