@@ -23,6 +23,7 @@ class KafkaSinkConfigSpec extends Specification {
   The KafkaSink defaults should:
     Provide default values from reference.conf $e1
     Raise an error on missing required value for client id $e2
+    Allow a default producer option to be unset with a null $e3
   """
 
   def e1 = {
@@ -73,7 +74,39 @@ class KafkaSinkConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     result.as[Wrapper] must beLeft.like { case e: DecodingFailure =>
-      e.show must beEqualTo("DecodingFailure at .xyz.producerConf.client.id: Got value 'null' with wrong type, expecting string")
+      e.show must beEqualTo("DecodingFailure at .xyz.producerConf: client.id must be set to a non-null value")
+    }
+  }
+
+  def e3 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sinks.kafka}
+    |   "xyz": {
+    |     "topicName": "my-topic"
+    |     "bootstrapServers": "my-bootstrap-server:9092"
+    |     "producerConf": {
+    |       "client.id": "my-client-id"
+    |       "sasl.mechanism": null
+    |       "sasl.jaas.config": null
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    val expected = KafkaSinkConfigM[Id](
+      topicName        = "my-topic",
+      bootstrapServers = "my-bootstrap-server:9092",
+      producerConf = Map(
+        "client.id" -> "my-client-id",
+        "security.protocol" -> "SASL_SSL"
+      )
+    )
+
+    result.as[Wrapper] must beRight.like { case w: Wrapper =>
+      w.xyz must beEqualTo(expected)
     }
   }
 

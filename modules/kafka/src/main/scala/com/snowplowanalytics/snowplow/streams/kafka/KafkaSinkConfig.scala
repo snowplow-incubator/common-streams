@@ -18,14 +18,21 @@ case class KafkaSinkConfigM[M[_]](
 )
 
 object KafkaSinkConfigM {
-  implicit def decoder: Decoder[KafkaSinkConfig] = deriveDecoder[KafkaSinkConfig]
+  implicit def decoder: Decoder[KafkaSinkConfig] = {
+    implicit val producerConfDecoder: Decoder[Map[String, String]] =
+      KafkaConfigDecoders.clientConf("client.id")
+    deriveDecoder[KafkaSinkConfig]
+  }
 
-  implicit def optionalDecoder: Decoder[Option[KafkaSinkConfig]] =
+  implicit def optionalDecoder: Decoder[Option[KafkaSinkConfig]] = {
+    implicit val producerConfDecoder: Decoder[Map[String, String]] =
+      KafkaConfigDecoders.clientConf("client.id")
     deriveDecoder[KafkaSinkConfigM[Option]].map {
       case KafkaSinkConfigM(Some(t), Some(b), conf) =>
         Some(KafkaSinkConfigM[Id](t, b, conf))
       case _ =>
         None
     }
+  }
 
 }

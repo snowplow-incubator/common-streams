@@ -46,9 +46,27 @@ private[streams] trait LowLevelSource[F[_], C] {
    *
    * A new [[EventProcessor]] will be invoked for each inner stream
    *
-   * The inner stream should periodically emit `None` as a signal that it is alive and healthy, even
-   * when there are no events on the stream. Failure to emit frequently will result in the
-   * `SourceAndAck` reporting itself as unhealthy.
+   * An inner stream must emit `None` frequently, or the `SourceAndAck` will report itself as
+   * unhealthy. But a `None` should mean specifically "a fetch from upstream succeeded and returned
+   * nothing".
+   *
+   * `monitorLatency` reports a latency of zero for every `None`, which is a true measurement only
+   * under that stronger contract: the source really did ask upstream, and there really was nothing
+   * waiting. It follows that the *absence* of reported latencies means the source itself has
+   * stalled, which is what the production alert on missing metrics detects. A source that emits
+   * `None` on a timer keeps the health check satisfied, but gives up that second guarantee
+   * silently.
+   *
+   * Kinesis satisfies the stronger contract via KCL's `callProcessRecordsEvenForEmptyRecordList`,
+   * and PubSub via emitting `None` whenever a pull is established or returns no messages, in both
+   * its streaming and unary modes.
+   *
+   * Kafka, NSQ and Http do not: each merges an identical 10-second keepalive, because none of their
+   * underlying clients exposes an equivalent signal. The keepalive goes on calling
+   * `latencyConsumer(Duration.Zero)` even while the client underneath is wedged, so statsd emits a
+   * zero instead of going quiet and the prometheus observations counter goes on advancing instead
+   * of going flat. Neither protocol's stalled-source signal fires for those three - one gap with
+   * one cause, and emitting `None` only on a successful fetch would close it on both at once.
    */
   def stream: Stream[F, Stream[F, Option[LowLevelEvents[C]]]]
 

@@ -14,9 +14,9 @@ object Dependencies {
     val cats             = "2.13.0"
     val catsEffect       = "3.7.1"
     val catsRetry        = "3.1.3"
-    val fs2              = "3.13.0"
+    val fs2              = "3.14.0"
     val log4cats         = "2.7.1"
-    val http4s           = "0.23.36"
+    val http4s           = "0.23.37"
     val blaze            = "0.23.18"
     val decline          = "2.4.1"
     val circe            = "0.14.16"
@@ -28,14 +28,14 @@ object Dependencies {
 
     // Streams
     val fs2Kafka       = "3.9.1"
-    val pubsub         = "1.154.0"
-    val awsSdk2        = "2.54.9"
+    val pubsub         = "1.155.0"
+    val awsSdk2        = "2.54.18"
     val kinesisClient  = "2.7.3"
     val kinesisClient3 = "3.4.1"
 
     // java
-    val slf4j      = "2.0.18"
-    val azureSdk   = "1.18.5"
+    val slf4j      = "2.0.19"
+    val azureSdk   = "1.18.6"
     val nsq        = "1.6.0"
     val jwt        = "10.5"
     val sentry     = "7.16.0"
@@ -46,6 +46,7 @@ object Dependencies {
     val schemaDdl    = "0.28.0"
     val badrows      = "2.3.0"
     val igluClient   = "4.2.1"
+    val igluCore     = "1.1.6"
     val analyticsSdk = "3.2.3"
 
     // tests
@@ -111,6 +112,7 @@ object Dependencies {
   val badrows      = "com.snowplowanalytics" %% "snowplow-badrows"             % V.badrows
   val schemaDdl    = "com.snowplowanalytics" %% "schema-ddl"                   % V.schemaDdl
   val igluClient   = "com.snowplowanalytics" %% "iglu-scala-client"            % V.igluClient
+  val igluCore     = "com.snowplowanalytics" %% "iglu-core"                    % V.igluCore
   val analyticsSdk = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk" % V.analyticsSdk
 
   // tests
@@ -216,6 +218,7 @@ object Dependencies {
     http4sCirce,
     http4sDsl,
     igluClient,
+    igluCore,
     log4cats,
     micrometerCore,
     micrometerPrometheus,
@@ -234,6 +237,7 @@ object Dependencies {
     badrows,
     circeLiteral % Test,
     igluClient,
+    igluCore,
     analyticsSdk,
     specs2,
     catsEffectSpecs2,

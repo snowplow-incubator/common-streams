@@ -1,3 +1,10 @@
+Version 0.27.0 (2026-09-16)
+--------------------------
+Allow kafka client options to be unset with a null (#60)
+Bump dependencies for 0.27.0 release (#59)
+Make the prometheus latency metrics trustworthy enough to alert on (#57)
+Allow metrics to be registered for prometheus only (#56)
+
 Version 0.26.1 (2026-09-02)
 --------------------------
 Bump dependencies for 0.26.1 release (#54)

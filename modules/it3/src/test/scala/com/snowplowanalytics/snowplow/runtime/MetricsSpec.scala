@@ -43,10 +43,12 @@ class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike
 
     Metrics.build[IO](Some(statsdConfig), prometheusConfig).use { entries =>
       for {
-        counter <- entries.counter("events_count")
-        timer <- entries.timer("latency", IO.pure(None))
+        counter <- entries.counter("events_count", Metrics.Destination.PrometheusAndStatsd)
+        lag <- entries.lagGauge("latency", IO.pure(None), Metrics.Destination.PrometheusAndStatsd)
+        cheapCounter <- entries.counter("cheap_count", Metrics.Destination.PrometheusOnly)
         _ <- counter.add(100)
-        _ <- timer.record(10.seconds)
+        _ <- lag.record(10.seconds)
+        _ <- cheapCounter.add(100)
         f <- entries.report.compile.drain.start
         _ <- IO.sleep(350.millis)
         counters <- statsdApi.getCounters
@@ -57,7 +59,7 @@ class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike
                       )
         gauges <- statsdApi.getGauges
                     .retryingOnFailures(
-                      v => IO.pure(v.contains("snowplow.latency")),
+                      v => IO.pure(v.contains("snowplow.latency_millis")),
                       RetryPolicies.constantDelay[IO](10.milliseconds),
                       (v, _) => IO.pure(println(s"Retry fetching metrics. Not ready: $v"))
                     )
@@ -65,8 +67,9 @@ class MetricsSpec extends CatsResource[IO, StatsdAPI[IO]] with SpecificationLike
       } yield List(
         counters.get("statsd.metrics_received") must beSome(2),
         counters.get("snowplow.events_count") must beSome(100),
+        counters.get("snowplow.cheap_count") must beNone,
         gauges must haveSize(1),
-        gauges.get("snowplow.latency") must beSome(10000)
+        gauges.get("snowplow.latency_millis") must beSome(10000)
       ).reduce(_ and _)
     }
   }

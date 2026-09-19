@@ -29,5 +29,9 @@ case class KafkaSourceConfig(
 )
 
 object KafkaSourceConfig {
-  implicit def decoder: Decoder[KafkaSourceConfig] = deriveDecoder[KafkaSourceConfig]
+  implicit def decoder: Decoder[KafkaSourceConfig] = {
+    implicit val consumerConfDecoder: Decoder[Map[String, String]] =
+      KafkaConfigDecoders.clientConf("group.id")
+    deriveDecoder[KafkaSourceConfig]
+  }
 }

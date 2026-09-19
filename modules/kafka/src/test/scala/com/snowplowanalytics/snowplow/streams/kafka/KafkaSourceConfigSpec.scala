@@ -24,6 +24,10 @@ class KafkaSourceConfigSpec extends Specification {
   The KafkaSource defaults should:
     Provide default values from reference.conf $e1
     Raise an error on missing required value for group id $e2
+    Allow a default consumer option to be unset with a null $e3
+    Raise an error if the required group id is explicitly unset with a null $e4
+    Raise an error on a consumer option which is not a string $e5
+    Raise an error on a missing group id for a config which does not inherit our defaults $e6
   """
 
   def e1 = {
@@ -79,7 +83,111 @@ class KafkaSourceConfigSpec extends Specification {
     val result = ConfigFactory.load(ConfigFactory.parseString(input))
 
     result.as[Wrapper] must beLeft.like { case e: DecodingFailure =>
-      e.show must beEqualTo("DecodingFailure at .xyz.consumerConf.group.id: Got value 'null' with wrong type, expecting string")
+      e.show must beEqualTo("DecodingFailure at .xyz.consumerConf: group.id must be set to a non-null value")
+    }
+  }
+
+  def e3 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.kafka}
+    |   "xyz": {
+    |     "topicName": "my-topic"
+    |     "bootstrapServers": "my-bootstrap-server:9092"
+    |     "consumerConf": {
+    |       "group.id": "my-cønsumer-group" # deliberately non-ascii, to cover encodings
+    |       "group.instance.id": null
+    |       "sasl.mechanism": null
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    val expected = KafkaSourceConfig(
+      topicName        = "my-topic",
+      bootstrapServers = "my-bootstrap-server:9092",
+      consumerConf = Map(
+        "group.id" -> "my-cønsumer-group",
+        "allow.auto.create.topics" -> "false",
+        "auto.offset.reset" -> "latest",
+        "security.protocol" -> "SASL_SSL",
+        "sasl.jaas.config" -> "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"
+      ),
+      debounceCommitOffsets = 10.seconds,
+      commitTimeout         = 15.seconds
+    )
+
+    result.as[Wrapper] must beRight.like { case w: Wrapper =>
+      w.xyz must beEqualTo(expected)
+    }
+  }
+
+  def e4 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.kafka}
+    |   "xyz": {
+    |     "topicName": "my-topic"
+    |     "bootstrapServers": "my-bootstrap-server:9092"
+    |     "consumerConf": {
+    |       "group.id": null
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    result.as[Wrapper] must beLeft.like { case e: DecodingFailure =>
+      e.show must beEqualTo("DecodingFailure at .xyz.consumerConf: group.id must be set to a non-null value")
+    }
+  }
+
+  def e5 = {
+    val input = s"""
+    |{
+    |   "xyz": $${snowplow.defaults.sources.kafka}
+    |   "xyz": {
+    |     "topicName": "my-topic"
+    |     "bootstrapServers": "my-bootstrap-server:9092"
+    |     "consumerConf": {
+    |       "group.id": "my-consumer-group"
+    |       "max.poll.records": 500
+    |     }
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    result.as[Wrapper] must beLeft.like { case e: DecodingFailure =>
+      e.show must beEqualTo(
+        "DecodingFailure at .xyz.consumerConf.max.poll.records: Got value '500' with wrong type, expecting string"
+      )
+    }
+  }
+
+  def e6 = {
+    val input = """
+    |{
+    |   "xyz": {
+    |     "topicName": "my-topic"
+    |     "bootstrapServers": "my-bootstrap-server:9092"
+    |     "consumerConf": {
+    |       "auto.offset.reset": "latest"
+    |     }
+    |     "debounceCommitOffsets": "10 seconds"
+    |     "commitTimeout": "15 seconds"
+    |   }
+    |}
+    |""".stripMargin
+
+    val result = ConfigFactory.load(ConfigFactory.parseString(input))
+
+    result.as[Wrapper] must beLeft.like { case e: DecodingFailure =>
+      e.show must beEqualTo("DecodingFailure at .xyz.consumerConf: group.id must be set to a non-null value")
     }
   }
 
