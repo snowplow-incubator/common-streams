@@ -1,3 +1,8 @@
+Version 0.27.1 (2026-10-16)
+--------------------------
+Bump dependencies (#64)
+Kafka: add aws-msk-iam-auth to be able to read from AWS MSK (#63)
+
 Version 0.27.0 (2026-09-16)
 --------------------------
 Allow kafka client options to be unset with a null (#60)
