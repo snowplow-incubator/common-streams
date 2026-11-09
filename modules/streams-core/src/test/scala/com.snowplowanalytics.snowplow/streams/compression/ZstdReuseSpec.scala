@@ -62,7 +62,13 @@ class ZstdReuseSpec extends Specification with CatsEffect {
           batches.map { records =>
             c.reset(TestPayloadVersion, 10000)
             records.foreach(r => c.addRecord(r, 0, r.length))
-            decode(c.result)
+            // An empty batch has no result: `result` throws, and the next `reset` starts afresh.
+            if (records.isEmpty)
+              scala.util.Try(c.result) match {
+                case scala.util.Failure(_: IllegalStateException) => Nil
+                case other                                        => throw new RuntimeException(s"Unexpected: $other")
+              }
+            else decode(c.result)
           }
         }
       }

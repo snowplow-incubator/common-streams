@@ -52,6 +52,12 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
     when handling Iglu failures should
       return a IgluError if schema key does not exist in a valid series of schemas $fail1
       return an InvalidSchema if the series contains a schema that cannot be parsed $fail2
+      return the family type and an IgluError for the missing version only, if a version in the batch is missing from the series $missing1
+      return no failure if the batch only uses versions that exist in a series with a gap $missing2
+      return no failure for a fetched version that yields no column $missing3
+      return no failure for fetched versions that go to recovery columns $missing4
+      return an InvalidSchema naming the first missing version, for an existing version skipped by the family lookup $missing5
+      name the first missing version of the revision, for every existing version skipped by the family lookup $missing6
 
     when resolving schemas with clashing field names should
       return Left(ClashingFieldNames) $clashingNames1
@@ -697,6 +703,161 @@ class NonAtomicFieldsSpec extends Specification with CatsEffect {
               (failure.versionsInBatch must beEqualTo(Set((0, 0)))) and
               (failure.failure must beLike { case _: FailureDetails.LoaderIgluError.InvalidSchema => ok })
           })
+      }
+    }
+
+  }
+
+  def missing1 = {
+
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "missing_addition", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 1), (1, 0))
+    )
+
+    val expected = {
+      val expectedStruct = Type.Struct(
+        NonEmptyVector.of(
+          Field("col_a", Type.String, Required),
+          Field("col_c", Type.String, Nullable)
+        )
+      )
+
+      val expectedField = Field("unstruct_event_myvendor_missing_addition_1", expectedStruct, Nullable, Set.empty)
+
+      TypedTabledEntity(
+        tabledEntity,
+        expectedField,
+        Set((0, 0), (1, 0)),
+        Nil
+      )
+    }
+
+    val missingKey = TabledEntity.toSchemaKey(tabledEntity, (0, 1))
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (fields must beEqualTo(Vector(expected))) and
+          (failures must haveSize(1)) and
+          (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
+            (failure.tabledEntity must beEqualTo(tabledEntity)) and
+              (failure.versionsInBatch must beEqualTo(Set((0, 1)))) and
+              (failure.failure must beLike { case FailureDetails.LoaderIgluError.IgluError(key, _) =>
+                key must beEqualTo(missingKey)
+              })
+          })
+      }
+    }
+
+  }
+
+  def missing2 = {
+
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "missing_addition", 1)
+
+    val input = Map(
+      tabledEntity -> Set((1, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head.mergedVersions must beEqualTo(Set((0, 0), (1, 0))))
+      }
+    }
+
+  }
+
+  def missing3 = {
+
+    // 1-0-0 is an empty object, so it is fetched but yields no column
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "test_empty_prop", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 0))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must beEmpty)
+      }
+    }
+
+  }
+
+  def missing4 = {
+
+    // 1-0-1 and 1-0-2 are fetched but cannot be merged, so they go to recovery columns
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "bad_schema_evolution", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 1), (0, 2))
+    )
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (failures must beEmpty) and
+          (fields must haveSize(1)) and
+          (fields.head.recoveries.map(_._1) must beEqualTo(List((0, 1), (0, 2))))
+      }
+    }
+
+  }
+
+  def missing5 = {
+
+    // 1-0-1 does not exist, so the family lookup skips the existing 1-0-2 as well
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "skipped_addition", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 2), (1, 0))
+    )
+
+    val skippedKey = TabledEntity.toSchemaKey(tabledEntity, (0, 2))
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(fields, failures) =>
+        (fields must haveSize(1)) and
+          (fields.head.mergedVersions must beEqualTo(Set((0, 0), (1, 0)))) and
+          (failures must haveSize(1)) and
+          (failures.head must beLike { case failure: NonAtomicFields.ColumnFailure =>
+            (failure.tabledEntity must beEqualTo(tabledEntity)) and
+              (failure.versionsInBatch must beEqualTo(Set((0, 2)))) and
+              (failure.failure must beLike { case FailureDetails.LoaderIgluError.InvalidSchema(key, message) =>
+                (key must beEqualTo(skippedKey)) and
+                  (message must beEqualTo(
+                    "The lookup of its family of schemas did not get past 1-0-1, so this version was not resolved and cannot be merged"
+                  ))
+              })
+          })
+      }
+    }
+
+  }
+
+  def missing6 = {
+
+    // 1-0-1 does not exist, so the family lookup skips the existing 1-0-2 and 1-0-3. Both must name 1-0-1, not their own predecessor.
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "myvendor", "skipped_addition", 1)
+
+    val input = Map(
+      tabledEntity -> Set((0, 2), (0, 3), (1, 0))
+    )
+
+    val expectedMessage =
+      "The lookup of its family of schemas did not get past 1-0-1, so this version was not resolved and cannot be merged"
+
+    NonAtomicFields.resolveTypes(embeddedResolver, input, List.empty).map {
+      _ must beRight.like { case NonAtomicFields.Result(_, failures) =>
+        failures.map(f => (f.versionsInBatch, f.failure)) must containTheSameElementsAs(
+          List(
+            Set((0, 2)) -> FailureDetails.LoaderIgluError.InvalidSchema(TabledEntity.toSchemaKey(tabledEntity, (0, 2)), expectedMessage),
+            Set((0, 3)) -> FailureDetails.LoaderIgluError.InvalidSchema(TabledEntity.toSchemaKey(tabledEntity, (0, 3)), expectedMessage)
+          )
+        )
       }
     }
 

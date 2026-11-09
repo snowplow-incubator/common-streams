@@ -37,7 +37,7 @@ class PubsubSourceConfigSpec extends Specification {
 
     val expected = PubsubSourceConfig(
       subscription            = PubsubSourceConfig.Subscription("my-project", "my-subscription"),
-      parallelPullFactor      = BigDecimal(0.5),
+      parallelPullFactor      = BigDecimal(2.0),
       durationPerAckExtension = 15.seconds,
       minRemainingAckDeadline = BigDecimal(0.1),
       maxMessagesPerPull      = 1000,

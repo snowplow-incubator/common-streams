@@ -36,6 +36,11 @@ class DecompressorSpec extends Specification with CatsEffect {
     handle corrupted zstd payload with trailing null bytes                       $ensureCorruptedZstdWithTrailingNull
     handle gzip stream with zero records                                         $ensureGzipZeroCrcCorrupt
     handle zstd stream with zero records                                         $ensureZstdZeroRecords
+    report CorruptHeader for a zstd stream with no magic number                  $ensureZstdBadMagicGivesCorruptHeader
+    never throw for a frame truncated at any length                              $ensureTruncatedFrameNeverThrows
+    report CorruptHeader for a severely truncated frame                          $ensureSeverelyTruncatedGivesCorruptHeader
+    handle a negative record size without throwing                               $ensureNegativeRecordSize
+    handle a truncated frame while skipping an oversized record                  $ensureSkipOfOversizedRecordOnTruncatedFrame
   """
 
   def extractSingleRecord = {
@@ -220,6 +225,99 @@ class DecompressorSpec extends Specification with CatsEffect {
     val factory    = new Decompressor.Zstd(1000)
     factory.build(compressed) must beLike { case FactorySuccess(decompressor, _) =>
       decompressor.getNextRecord must beEqualTo(EndOfRecords)
+    }
+  }
+
+  /**
+   * A stream that does not start with the zstd magic number used to throw `ZstdIOException("Unknown
+   * frame descriptor")` straight out of `build`.
+   */
+  def ensureZstdBadMagicGivesCorruptHeader = {
+    // A minimal zstd frame (frame header, one raw block holding the Snowplow header 1, 42) with the
+    // magic number 0x28B52FFD zeroed out.
+    val compressed = java.nio.ByteBuffer.wrap(Array[Byte](0, 0, 0, 0, 0, 88, 17, 0, 0, 1, 42))
+    val factory    = new Decompressor.Zstd(1000)
+    factory.build(compressed) must beEqualTo(CorruptHeader)
+  }
+
+  /**
+   * The regression test for the crash this suite previously missed.
+   *
+   * Truncating the *frame* is not the same as the existing "incomplete" tests, which close the
+   * compression stream properly and so only damage the inner record framing. Here we chop bytes off
+   * the end of the frame at every possible length, because the crash only appeared once the frame
+   * was short enough that not even the first header byte could be decompressed.
+   */
+  def ensureTruncatedFrameNeverThrows = {
+    val records = List("hello world this is a record".getBytes("UTF-8"))
+    testBothCompressionTypes { compressionType =>
+      val fullLength = compressedLength(records, compressionType)
+      val outcomes = (0 until fullLength).toList.map { keepBytes =>
+        val compressed = createTruncatedCompressedStream(records, compressionType, keepBytes)
+        val factory    = getFactory(compressionType, maxBytesSinglePayload = 1000)
+        // Drain fully, so we exercise both the header read and the record reads
+        factory.build(compressed) match {
+          case FactorySuccess(decompressor, _) =>
+            val results = (1 to records.length + 1).map(_ => decompressor.getNextRecord).toList
+            decompressor.close()
+            results.forall {
+              case Record(_) | EndOfRecords | CorruptInput => true
+              case _                                       => false
+            }
+          case CorruptHeader                     => true
+          case UnsupportedVersionsInHeader(_, _) => true
+        }
+      }
+      outcomes must contain(beTrue).forall
+    }
+  }
+
+  /**
+   * Pins the specific failure seen in production logs: a zstd frame short enough that the header
+   * read throws `ZstdIOException: Truncated source`. The gzip equivalent throws `EOFException`.
+   */
+  def ensureSeverelyTruncatedGivesCorruptHeader = {
+    val records = List("hello world this is a record".getBytes("UTF-8"))
+    testBothCompressionTypes { compressionType =>
+      val compressed = createTruncatedCompressedStream(records, compressionType, keepBytes = 5)
+      val factory    = getFactory(compressionType, maxBytesSinglePayload = 1000)
+      factory.build(compressed) must beEqualTo(CorruptHeader)
+    }
+  }
+
+  /**
+   * A garbage record-length prefix used to reach `new Array[Byte](negative)`, which threw
+   * `NegativeArraySizeException` — not an `IOException`, so it escaped the handler.
+   */
+  def ensureNegativeRecordSize =
+    testBothCompressionTypes { compressionType =>
+      val compressed = createStreamWithRawBody(compressionType, sizePrefix(-1) ++ Array.fill[Byte](10)(7))
+      val factory    = getFactory(compressionType, maxBytesSinglePayload = 1000)
+      factory.build(compressed) must beLike { case FactorySuccess(decompressor, _) =>
+        val result = decompressor.getNextRecord
+        decompressor.close()
+        result must beEqualTo(CorruptInput)
+      }
+    }
+
+  /**
+   * Reaches the `stream.skip` call, which sat outside both `try` blocks. Needs an oversized record
+   * (so we skip rather than read) of incompressible data (so the frame spans several blocks and the
+   * truncation actually bites part-way through the skip).
+   */
+  def ensureSkipOfOversizedRecordOnTruncatedFrame = {
+    val big = new Array[Byte](200000)
+    new Random(0).nextBytes(big)
+    val records = List(big)
+    testBothCompressionTypes { compressionType =>
+      val fullLength = compressedLength(records, compressionType)
+      val compressed = createTruncatedCompressedStream(records, compressionType, keepBytes = fullLength / 2)
+      val factory    = getFactory(compressionType, maxBytesSinglePayload = 1000)
+      factory.build(compressed) must beLike { case FactorySuccess(decompressor, _) =>
+        val result = decompressor.getNextRecord
+        decompressor.close()
+        result must beEqualTo(CorruptInput)
+      }
     }
   }
 

@@ -85,6 +85,59 @@ object CompressionTestUtils {
     ByteBuffer.wrap(baos.toByteArray)
   }
 
+  /**
+   * Truncates a compressed message, i.e. chops bytes off the end of the compression frame itself.
+   *
+   * This is different from [[createIncompleteCompressedStream]], which produces a *complete*
+   * compression frame whose inner Snowplow record framing is incomplete. Here the frame itself is
+   * damaged, which is what happens if a producer writes a partial message to the stream.
+   *
+   * @param keepBytes
+   *   How many bytes of the compressed message to retain.
+   */
+  def createTruncatedCompressedStream(
+    records: List[Array[Byte]],
+    compressionType: CompressionType,
+    keepBytes: Int
+  ): ByteBuffer = {
+    val full = createCompressedStream(records, compressionType)
+    val arr  = new Array[Byte](full.remaining)
+    full.duplicate.get(arr)
+    ByteBuffer.wrap(arr.take(keepBytes))
+  }
+
+  /** The full compressed length of a message, so tests can truncate across its whole range */
+  def compressedLength(records: List[Array[Byte]], compressionType: CompressionType): Int =
+    createCompressedStream(records, compressionType).remaining
+
+  /**
+   * Builds a well-formed compression frame wrapping a valid Snowplow header followed by arbitrary
+   * bytes, so a test can control the inner record framing exactly.
+   */
+  def createStreamWithRawBody(
+    compressionType: CompressionType,
+    body: Array[Byte]
+  ): ByteBuffer = {
+    val baos = new ByteArrayOutputStream()
+    val compressionStream: OutputStream = compressionType match {
+      case CompressionType.GZIP => new GZIPOutputStream(baos)
+      case CompressionType.ZSTD => new ZstdOutputStream(baos)
+    }
+    compressionStream.write(1) // compression format version
+    compressionStream.write(1) // payload format version
+    compressionStream.write(body)
+    compressionStream.close()
+    ByteBuffer.wrap(baos.toByteArray)
+  }
+
+  /** Encodes a record-length prefix the way the Snowplow batching protocol does */
+  def sizePrefix(n: Int): Array[Byte] = {
+    val bb = ByteBuffer.allocate(4)
+    bb.order(ByteOrder.BIG_ENDIAN)
+    bb.putInt(n)
+    bb.array()
+  }
+
   def createIncompleteCompressedStream(
     compressionType: CompressionType,
     incompleteSize: Boolean
@@ -138,9 +191,8 @@ object CompressionTestUtils {
   }
 
   /**
-   * Creates a gzip stream with the Snowplow header but zero records and a zeroed CRC32. This
-   * matches what GzipCompressor currently produces when no records are added, because
-   * CommittableCRC32 is never committed during initialize().
+   * Creates a hand-made corrupt gzip stream for decoder tests: the Snowplow header, zero records,
+   * and a zeroed CRC32 in the trailer.
    */
   def createGzipWithZeroCrc(): ByteBuffer = {
     val baos              = new ByteArrayOutputStream()

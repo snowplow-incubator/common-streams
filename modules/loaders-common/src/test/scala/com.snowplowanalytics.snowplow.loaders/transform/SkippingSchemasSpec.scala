@@ -34,6 +34,8 @@ class SkippingSchemasSpec extends Specification {
     Skip all matching partial A-B-* criteria ${Unstructured.e5}
     Skip all matching full A-B-C criteria ${Unstructured.e6}
     Skip all for mixed criteria: A-*-* + A-B-* + A-B-C ${Unstructured.e7}
+    Skip a schema family present in both custom and derived contexts ${Unstructured.e8}
+    Skip one version of a schema family present in both custom and derived contexts ${Unstructured.e9}
     
    For structured: 
     Skip none if there is nothing to skip ${Structured.e1}
@@ -220,6 +222,41 @@ class SkippingSchemasSpec extends Specification {
           "contexts_com_example_my_schema_3"
         ),
         shouldExist = List.empty
+      )
+    }
+
+    def e8 = {
+      val schemasToSkip = List("iglu:com.acme/foo/jsonschema/1-*-*")
+
+      val input = inputEvent(
+        withUnstruct        = None,
+        withContexts        = List(sdj(key = "iglu:com.acme/foo/jsonschema/1-0-0", data = json"""{"a": 1}""")),
+        withDerivedContexts = List(sdj(key = "iglu:com.acme/foo/jsonschema/1-0-1", data = json"""{"a": 2}"""))
+      )
+
+      assertUnstructured(input, schemasToSkip)(
+        shouldNotExist = List("contexts_com_acme_foo_1"),
+        shouldExist    = List.empty
+      )
+    }
+
+    def e9 = {
+      val schemasToSkip = List("iglu:com.acme/foo/jsonschema/1-0-0")
+
+      val input = inputEvent(
+        withUnstruct        = None,
+        withContexts        = List(sdj(key = "iglu:com.acme/foo/jsonschema/1-0-0", data = json"""{"a": 1}""")),
+        withDerivedContexts = List(sdj(key = "iglu:com.acme/foo/jsonschema/1-0-1", data = json"""{"a": 2}"""))
+      )
+
+      assertUnstructured(input, schemasToSkip)(
+        shouldNotExist = List.empty,
+        shouldExist = List(
+          NamedValue(
+            name  = "contexts_com_acme_foo_1",
+            value = json"""[{"_schema_version" : "1-0-1", "a": 2}]"""
+          )
+        )
       )
     }
   }
@@ -436,9 +473,11 @@ class SkippingSchemasSpec extends Specification {
       .transformEventUnstructured(
         badProcessor,
         TestCaster,
-        TestCirceFolder,
+        _.foldWith(TestCirceFolder),
         input,
-        schemasToSkip.map(schemas => SchemaCriterion.parse(schemas).get)
+        schemasToSkip.map(schemas => SchemaCriterion.parse(schemas).get),
+        Int.MaxValue,
+        false
       )
       .toOption
       .get

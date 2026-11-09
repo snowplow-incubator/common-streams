@@ -1,3 +1,16 @@
+Version 0.28.0 (2026-11-05)
+--------------------------
+Raise the default Pub/Sub parallelPullFactor to 2.0 (PDP-2978) (#77)
+Transform.transformEventUnstructured: name entity columns within a length limit (#76)
+Transform.transformEventUnstructured: take entityValue: Json => A (#75)
+Keep custom contexts whose schema family is also in derived contexts (#73)
+resolveTypes: report entity versions the schema family lookup did not fetch (#71)
+Fix native memory leak in gzip compressor by reusing one Deflater per Resource (#70)
+Compressor: throw from result on a batch with no accepted records (#69)
+Prevent a corrupt compressed message from crashing the app (#51)
+Harden claude.yml workflow against prompt injection
+Bump iglu-scala-client to 4.3.0 (#67)
+
 Version 0.27.1 (2026-10-16)
 --------------------------
 Bump dependencies (#64)

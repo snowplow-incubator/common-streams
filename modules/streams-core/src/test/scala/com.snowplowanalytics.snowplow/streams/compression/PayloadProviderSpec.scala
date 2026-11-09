@@ -40,6 +40,8 @@ class PayloadProviderSpec extends Specification with CatsEffect {
     emit multiple batches when decompressed size exceeds maxBytesInBatch  $handleBatchSizeLimits
     reject payloads exceeding maxBytesSinglePayload size limit            $handlePayloadSizeLimit
     handle corrupt compressed data                                        $handleCorruptCompression
+    handle a severely truncated compressed message                        $handleSeverelyTruncatedCompression
+    keep processing valid messages alongside a truncated one              $handleTruncatedAmongValid
     handle unsupported compression header versions                        $handleUnsupportedVersions
     handle malformed compression signatures                               $handleMalformedSignatures
     handle very small buffers that don't match compression signatures     $handleSmallBuffers
@@ -174,6 +176,37 @@ class PayloadProviderSpec extends Specification with CatsEffect {
       input           = createIncompleteCompressedStream(CompressionType.ZSTD, false),
       expectedMessage = "corrupt zstd-compressed payload"
     )
+
+  /**
+   * The end-to-end regression test: a message truncated hard enough that the zstd header read
+   * throws used to propagate out of the pipe and kill the stream. Since the ack is never
+   * checkpointed, the message would be redelivered on restart and crash the app again.
+   */
+  def handleSeverelyTruncatedCompression: IO[MatchResult[Any]] =
+    testDecompressionFailure(
+      input           = createTruncatedCompressedStream(List("test".getBytes), CompressionType.ZSTD, keepBytes = 5),
+      expectedMessage = "corrupt zstd-compressed payload header"
+    )
+
+  /**
+   * The property that actually matters operationally: one poisonous message must not stop the valid
+   * messages either side of it from being processed and acked.
+   */
+  def handleTruncatedAmongValid: IO[MatchResult[Any]] = {
+    val valid     = createZstdCompressedStream(List("valid"))
+    val truncated = createTruncatedCompressedStream(List("test".getBytes), CompressionType.ZSTD, keepBytes = 5)
+    val valid2    = createZstdCompressedStream(List("valid2"))
+
+    createTokenedEvents(List(valid, truncated, valid2)).flatMap { tokenedEvents =>
+      runPayloadProvider(tokenedEvents, testConfig, toBadRow).map { results =>
+        (results must have length 1) and
+          (results.head.payloads must have length 2) and
+          (results.head.payloads.map(extractString) must containTheSameElementsAs(List("valid", "valid2"))) and
+          (results.head.bad must have length 1) and
+          (results.head.ack must beEqualTo(tokenedEvents.ack.some))
+      }
+    }
+  }
 
   def handleUnsupportedVersions: IO[MatchResult[Any]] =
     testDecompressionFailure(

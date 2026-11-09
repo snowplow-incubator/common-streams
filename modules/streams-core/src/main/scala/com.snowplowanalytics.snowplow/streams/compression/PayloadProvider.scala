@@ -63,13 +63,17 @@ private[compression] object PayloadProvider {
     f: Decompressor.FactoryResult => Pull[F, DecompressedTokenedEvents, DrainDecompressorResult]
   ): Pull[F, DecompressedTokenedEvents, DrainDecompressorResult] =
     Pull.bracketCase(
-      Pull.pure(factory.build(data)),
+      // Deferred into the acquire step, so the bracket genuinely covers opening the decompressor
+      Pull.eval(Sync[F].delay(factory.build(data))),
       f,
       (factoryResult: Decompressor.FactoryResult, _: Resource.ExitCase) =>
         factoryResult match {
           case Decompressor.FactorySuccess(decompressor, _) =>
             Pull.eval(Sync[F].delay(decompressor.close()))
           case Decompressor.UnsupportedVersionsInHeader(_, _) =>
+            Pull.done
+          case Decompressor.CorruptHeader =>
+            // `build` already released the stream, because it never handed us a Decompressor
             Pull.done
         }
     )
@@ -84,7 +88,8 @@ private[compression] object PayloadProvider {
    *   - If a single incoming TokenedEvents yields >1 batch, then the `ack` token is attached to
    *     only the final batch from this input.
    *
-   * Three failure modes are distinguished:
+   * Four failure modes are distinguished. A malformed message always yields a bad row; it never
+   * throws, so a single bad message cannot crash the application and become a poison pill.
    *
    *   - [[Decompressor.RecordTooBig]] — a single record would exceed
    *     `decompressionConfig.maxBytesSinglePayload` after decompression. The record is skipped (the
@@ -94,6 +99,9 @@ private[compression] object PayloadProvider {
    *   - [[Decompressor.CorruptInput]] — the compressed stream is malformed or truncated. The entire
    *     compressed message is abandoned and `toBadRow` is invoked with message `"corrupt
    *     <format>-compressed payload"`.
+   *   - [[Decompressor.CorruptHeader]] — the compressed message is damaged so badly that not even
+   *     the two header bytes could be decompressed. The entire compressed message is abandoned and
+   *     `toBadRow` is invoked with message `"corrupt <format>-compressed payload header"`.
    *   - [[Decompressor.UnsupportedVersionsInHeader]] — the Snowplow compression-format version byte
    *     is not `1`. The entire compressed message is abandoned and `toBadRow` is invoked with
    *     message `"unsupported versions in <format>-compressed record header: <v1>, <v2>"`.
@@ -220,6 +228,11 @@ private[compression] object PayloadProvider {
               drainDecompressor(pending, pendingByteCount, pendingBad, decompressor, head, fv)
             case Decompressor.UnsupportedVersionsInHeader(v1, v2) =>
               val message = show"unsupported versions in ${factory.format}-compressed record header: $v1, $v2"
+              for {
+                bad <- Pull.eval(buildFailureBadRow(toBadRow, message, head.slice()))
+              } yield DrainDecompressorResult(pending, pendingByteCount, bad :: pendingBad, payloadVersion)
+            case Decompressor.CorruptHeader =>
+              val message = show"corrupt ${factory.format}-compressed payload header"
               for {
                 bad <- Pull.eval(buildFailureBadRow(toBadRow, message, head.slice()))
               } yield DrainDecompressorResult(pending, pendingByteCount, bad :: pendingBad, payloadVersion)

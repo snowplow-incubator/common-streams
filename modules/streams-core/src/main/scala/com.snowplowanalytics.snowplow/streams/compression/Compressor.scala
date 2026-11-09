@@ -22,6 +22,9 @@ trait Compressor {
   /**
    * Begin a new batch: prepare a fresh output frame and write the Snowplow header.
    *
+   * Valid in any state, including straight after a rejected record without calling `result`; any
+   * unfinished batch is discarded.
+   *
    * `targetSize` is chosen per batch: it caps the compressed frame size and is the point at which
    * `addRecord` starts rejecting records. It only affects this batch's heap-side output buffer, not
    * the long-lived (off-heap) resources reused across batches, so it is cheap to vary from one
@@ -40,10 +43,11 @@ trait Compressor {
    *   false if adding the record would push the compressed frame past the target size, in which
    *   case the record is NOT added and the frame is rewound to before it.
    *
-   * Once addRecord returns false, do not call it again for the current batch: take `result` to
-   * obtain the batch, then `reset` before adding further records. Adding a record after a
-   * rejection, or after `result`, throws IllegalStateException rather than silently corrupting the
-   * output.
+   * Once addRecord returns false, do not call it again for the current batch: if `recordCount > 0`
+   * take `result` to obtain the batch, then `reset` before adding further records. If the first
+   * record of the batch was rejected there is nothing to take, so `reset` straight away. Adding a
+   * record after a rejection, or after `result`, throws IllegalStateException rather than silently
+   * corrupting the output.
    */
   def addRecord(
     record: Array[Byte],
@@ -56,6 +60,10 @@ trait Compressor {
    *
    * Must be called after `reset` and before the next `reset`; calling it before a batch has begun,
    * or a second time on the same batch, throws IllegalStateException.
+   *
+   * The batch must hold at least one accepted record: callers must check `recordCount > 0` first.
+   * Calling it on an empty batch (nothing added since `reset`, or the first record was rejected)
+   * throws IllegalStateException rather than producing a frame with no records.
    */
   def result: ByteBuffer
 
@@ -94,11 +102,12 @@ object Compressor {
    *   - Uninitialised --reset--> Open
    *   - Open --addRecord accepted--> Open
    *   - Open --addRecord rejected--> Full
-   *   - Open --result--> Closed
-   *   - Full --result--> Closed
-   *   - Closed --reset--> Open
+   *   - Open --result--> Closed (only if recordCount > 0)
+   *   - Full --result--> Closed (only if recordCount > 0)
+   *   - Uninitialised/Open/Full/Closed --reset--> Open
    *
-   * So `addRecord` is only valid in `Open`, and `result` is valid in `Open` or `Full`.
+   * So `addRecord` is only valid in `Open`, and `result` is valid in `Open` or `Full` when at least
+   * one record was accepted. `reset` is valid in any state.
    */
   private[compression] sealed trait State
   private[compression] object State {
@@ -170,6 +179,10 @@ object Compressor {
       if ((state ne Open) && (state ne Full))
         throw new IllegalStateException(
           s"result is not valid in state $state; call reset to begin a batch before taking its result"
+        )
+      if (_recordCount == 0)
+        throw new IllegalStateException(
+          "result is not valid on a batch with no accepted records; check recordCount > 0 before calling result"
         )
       engine.finish()
       state = Closed

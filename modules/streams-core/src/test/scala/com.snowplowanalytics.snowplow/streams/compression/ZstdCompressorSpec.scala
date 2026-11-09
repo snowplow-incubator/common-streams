@@ -28,8 +28,8 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
     handle boundary case at exact target size                 $z7
     reject record that exceeds target size by one byte        $z8
     handle large records                                      $z9
-    produce expected bytes when no records added              $z10
-    produce invalid stream when first record is rejected      $z11
+    throw on result when no records added                     $z10
+    throw on result when first record is rejected             $z11
   """
 
   def z1 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
@@ -145,28 +145,16 @@ class ZstdCompressorSpec extends Specification with CatsEffect {
   }
 
   def z10 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 1000) { compressor =>
-    val compressed = compressor.result
-
-    val bytes = new Array[Byte](compressed.remaining())
-    compressed.get(bytes)
-
-    // 40, -75, 47, -3  — zstd magic number (0x28B52FFD)
-    // 0, 88            — frame header (descriptor + window size)
-    // 17, 0, 0         — block header (last=true, type=raw, size=2)
-    // 1, 42            — Snowplow header uncompressed (compression version=1, payload version=42)
-    val expected = Array[Byte](40, -75, 47, -3, 0, 88, 17, 0, 0, 1, 42)
-
     (compressor.recordCount must beEqualTo(0): MatchResult[Any]) and
-      (bytes must beEqualTo(expected))
+      (compressor.result must throwAn[IllegalStateException])
   }
 
   def z11 = withCompressor(CompressorFactory.zstd(3), TestPayloadVersion, 20) { compressor =>
     val largeRecord = new Array[Byte](10000)
 
-    val isAdded    = compressor.addRecord(largeRecord, 0, largeRecord.length)
-    val compressed = compressor.result
+    val isAdded = compressor.addRecord(largeRecord, 0, largeRecord.length)
 
     (isAdded must beFalse: MatchResult[Any]) and
-      (factory.build(compressed) must throwA[com.github.luben.zstd.ZstdIOException]("Unknown frame descriptor"))
+      (compressor.result must throwAn[IllegalStateException])
   }
 }

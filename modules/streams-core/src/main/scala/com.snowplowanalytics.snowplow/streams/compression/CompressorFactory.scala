@@ -12,9 +12,12 @@ import cats.effect.{Resource, Sync}
 
 import com.github.luben.zstd.ZstdCompressCtx
 
+import java.util.zip.Deflater
+
 /**
  * Builds a reusable [[Compressor]] as a Resource. The Resource owns the long-lived (off-heap)
- * resources: for zstd, the native compression context, freed once on release.
+ * resources: the native deflater for gzip, or the native compression context for zstd, freed once
+ * on release.
  *
  * @see
  *   Compressor for the (serial, not-thread-safe) usage contract.
@@ -28,7 +31,10 @@ object CompressorFactory {
   def gzip(compressionLevel: Int): CompressorFactory =
     new CompressorFactory {
       override def resource[F[_]: Sync]: Resource[F, Compressor] =
-        Resource.pure(new Compressor.Impl(new GzipEngine(compressionLevel)))
+        Resource
+          // nowrap = true: the engine writes the gzip header and trailer itself, so the deflater emits raw deflate
+          .make(Sync[F].delay(new Deflater(compressionLevel, true)))(d => Sync[F].delay(d.end()))
+          .map(d => new Compressor.Impl(new GzipEngine(d)))
     }
 
   def zstd(compressionLevel: Int): CompressorFactory =

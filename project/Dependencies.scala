@@ -29,7 +29,7 @@ object Dependencies {
     // Snowplow libraries
     val schemaDdl    = "0.28.0"
     val badrows      = "2.3.0"
-    val igluClient   = "4.2.1"
+    val igluClient   = "4.3.0"
     val igluCore     = "1.1.6"
     val analyticsSdk = "3.2.3"
 
@@ -291,6 +291,7 @@ object Dependencies {
     igluCore,
     analyticsSdk,
     specs2,
+    specs2Scalacheck,
     catsEffectSpecs2,
     slf4jSimple % Test,
     eventGen

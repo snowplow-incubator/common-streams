@@ -82,7 +82,7 @@ object Decompression {
      * @param badRowProcessor
      *   Metadata about the application, used when creating size violation bad rows
      * @param toBadRow
-     *   Three failure modes are distinguished:
+     *   Four failure modes are distinguished:
      *   - [[Decompressor.RecordTooBig]] — a single record would exceed
      *     `decompressionConfig.maxBytesSinglePayload` after decompression. The record is skipped
      *     (the decompressor stays functional) and a `BadRow.SizeViolation` is emitted alongside the
@@ -90,6 +90,9 @@ object Decompression {
      *   - [[Decompressor.CorruptInput]] — the compressed stream is malformed or truncated. The
      *     entire compressed message is abandoned and `toBadRow` is invoked with message `"corrupt
      *     <format>-compressed payload"`.
+     *   - [[Decompressor.CorruptHeader]] — the compressed message is damaged so badly that not even
+     *     the two header bytes could be decompressed. The entire compressed message is abandoned
+     *     and `toBadRow` is invoked with message `"corrupt <format>-compressed payload header"`.
      *   - [[Decompressor.UnsupportedVersionsInHeader]] — the Snowplow compression-format version
      *     byte is not `1`. The entire compressed message is abandoned and `toBadRow` is invoked
      *     with message `"unsupported versions in <format>-compressed record header: <v1>, <v2>"`.

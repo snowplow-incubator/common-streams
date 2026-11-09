@@ -14,7 +14,7 @@ import org.specs2.Specification
 import org.specs2.matcher.MatchResult
 
 class CompressorLifecycleSpec extends Specification with CatsEffect {
-  import CompressionTestUtils.TestPayloadVersion
+  import CompressionTestUtils.{TestPayloadVersion, verifyFormat}
 
   def is = s2"""
   The Compressor lifecycle guard should
@@ -23,8 +23,10 @@ class CompressorLifecycleSpec extends Specification with CatsEffect {
     throw if addRecord is called after result                     $addRecordAfterResult
     throw if addRecord is called after a rejected record          $addRecordAfterRejection
     throw if result is called twice on the same batch             $resultTwice
-    still allow result after a record is rejected                 $resultAfterRejectionAllowed
+    throw if result is called after the first record is rejected  $resultAfterFirstRejection
     still allow reuse: reset then addRecord after taking result   $reuseAfterResult
+    allow reset straight after the first record is rejected       $resetAfterFirstRejection
+    discard an unfinished batch with accepted records on reset    $resetPartwayThroughBatch
   """
 
   private val record = "hello".getBytes("UTF-8")
@@ -47,6 +49,13 @@ class CompressorLifecycleSpec extends Specification with CatsEffect {
     for {
       g <- CompressorFactory.gzip(3).resource[IO].use(c => IO(f(c)))
       z <- CompressorFactory.zstd(3).resource[IO].use(c => IO(f(c)))
+    } yield g and z
+
+  // As eachEngine, but also hands over the matching decompressor so a test can decode the output.
+  private def eachEngineWithDecoder(f: (Compressor, Decompressor.Factory) => MatchResult[Any]): IO[MatchResult[Any]] =
+    for {
+      g <- CompressorFactory.gzip(3).resource[IO].use(c => IO(f(c, new Decompressor.Gzip(Int.MaxValue))))
+      z <- CompressorFactory.zstd(3).resource[IO].use(c => IO(f(c, new Decompressor.Zstd(Int.MaxValue))))
     } yield g and z
 
   def addRecordBeforeReset: IO[MatchResult[Any]] = eachEngine { c =>
@@ -77,11 +86,10 @@ class CompressorLifecycleSpec extends Specification with CatsEffect {
     c.result must throwAn[IllegalStateException]
   }
 
-  def resultAfterRejectionAllowed: IO[MatchResult[Any]] = eachEngine { c =>
+  def resultAfterFirstRejection: IO[MatchResult[Any]] = eachEngine { c =>
     c.reset(TestPayloadVersion, 100)
     val rejected = add(c, bigRecord)
-    val bb       = c.result // must not throw
-    (rejected must beFalse) and (bb must not(beNull))
+    (rejected must beFalse) and (c.result must throwAn[IllegalStateException])
   }
 
   def reuseAfterResult: IO[MatchResult[Any]] = eachEngine { c =>
@@ -90,5 +98,31 @@ class CompressorLifecycleSpec extends Specification with CatsEffect {
     discard(c.result)
     c.reset(TestPayloadVersion, 10000)
     add(c) must beTrue
+  }
+
+  def resetAfterFirstRejection: IO[MatchResult[Any]] = eachEngineWithDecoder { (c, decoder) =>
+    c.reset(TestPayloadVersion, 100)
+    val rejected = add(c, bigRecord)
+    c.reset(TestPayloadVersion, 10000)
+    val accepted   = add(c)
+    val compressed = c.result
+    // Only a decode proves that no engine state leaked across the reset.
+    (rejected must beFalse) and
+      (accepted must beTrue: MatchResult[Any]) and
+      (c.recordCount must beEqualTo(1): MatchResult[Any]) and
+      (verifyFormat(compressed, List(record), decoder) must beTrue)
+  }
+
+  def resetPartwayThroughBatch: IO[MatchResult[Any]] = eachEngineWithDecoder { (c, decoder) =>
+    val discarded = "discarded".getBytes("UTF-8")
+    c.reset(TestPayloadVersion, 10000)
+    discard(add(c, discarded))
+    discard(add(c, discarded))
+    c.reset(TestPayloadVersion, 10000)
+    val accepted   = add(c)
+    val compressed = c.result
+    (accepted must beTrue) and
+      (c.recordCount must beEqualTo(1): MatchResult[Any]) and
+      (verifyFormat(compressed, List(record), decoder) must beTrue)
   }
 }

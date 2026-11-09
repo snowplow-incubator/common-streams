@@ -13,7 +13,6 @@ import cats.implicits._
 import com.snowplowanalytics.iglu.core.{SchemaCriterion, SchemaKey, SelfDescribingData}
 import com.snowplowanalytics.iglu.schemaddl.parquet.{CastError, Caster, Field, Type}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
-import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts, UnstructEvent}
 import com.snowplowanalytics.snowplow.badrows.{
   BadRow,
   Failure => BadRowFailure,
@@ -66,10 +65,21 @@ object Transform {
    *   Details about this loader, only used for generating a bad row
    * @param caster
    *   Casts schema + JSON into an application-specific type
-   * @param jsonCaster
-   *   Casts JSON into an application-specific type, without regard for the Iglu schema
+   * @param entityValue
+   *   Converts an entity column's JSON into an application-specific type, without regard for the
+   *   Iglu schema. It is called exactly once per entity column, with the whole gathered JSON: the
+   *   array of every context of a schema family (custom contexts first, then derived), or the data
+   *   of the unstruct event. A `Json.Folder` can be passed as `_.foldWith(folder)`.
    * @param event
    *   The Snowplow Event received from the stream
+   * @param entitiesToSkip
+   *   Entities matching any of these criteria are left out of the output
+   * @param maxColumnNameLength
+   *   The destination's identifier length limit, used to name the entity columns. See
+   *   [[TabledEntity.columnName]].
+   * @param useShortPrefixes
+   *   Whether entity columns are prefixed with `ctx_` and `ue_` instead of `contexts_` and
+   *   `unstruct_event_`. See [[TabledEntity.columnName]].
    * @return
    *   Application-specific types if the Snowplow atomic fields can be cast to the correct types.
    *   Otherwise a bad row.
@@ -77,30 +87,60 @@ object Transform {
   def transformEventUnstructured[A](
     processor: BadRowProcessor,
     caster: Caster[A],
-    jsonCaster: Json.Folder[A],
+    entityValue: Json => A,
     event: Event,
-    entitiesToSkip: List[SchemaCriterion]
+    entitiesToSkip: List[SchemaCriterion],
+    maxColumnNameLength: Int,
+    useShortPrefixes: Boolean
   ): Either[BadRow, Vector[Caster.NamedValue[A]]] =
     forAtomic(caster, event).toEither
       .map { atomic =>
-        atomic ++ extractEntities(event, entitiesToSkip).iterator.map { case (key, json) =>
-          Caster.NamedValue(key, json.foldWith(jsonCaster))
+        atomic ++ extractEntities(event, entitiesToSkip, maxColumnNameLength, useShortPrefixes).iterator.map { case (key, json) =>
+          Caster.NamedValue(key, entityValue(json))
         }.toVector
       }
       .leftMap { nel =>
         BadRow.LoaderIgluError(processor, BadRowFailure.LoaderIgluErrors(nel), BadPayload.LoaderPayload(event))
       }
 
-  private def extractEntities(event: Event, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
-    extractFromContexts(event.contexts, entitiesToSkip) ++
-      extractFromContexts(event.derived_contexts, entitiesToSkip) ++
-      extractFromUnstruct(event.unstruct_event, entitiesToSkip)
+  // Custom and derived contexts are gathered as one list, custom first, so that a family present in both lands in a
+  // single column. Every context whose TabledEntity has the same column name shares that column, in event order.
+  // Each TabledEntity is named once, however many of its contexts the event has.
+  private def extractEntities(
+    event: Event,
+    entitiesToSkip: List[SchemaCriterion],
+    maxColumnNameLength: Int,
+    useShortPrefixes: Boolean
+  ): Map[String, Json] = {
+    val contexts = filterOutEntities(event.contexts.data ::: event.derived_contexts.data, entitiesToSkip)
+      .map(sdd => TabledEntity.forContext(sdd.schema) -> sdd)
 
-  private def extractFromContexts(contexts: Contexts, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
-    Contexts(filterOutEntities(contexts.data, entitiesToSkip)).toShreddedJson
+    val columnNames = contexts
+      .map(_._1)
+      .distinct
+      .map(te => te -> TabledEntity.columnName(te, maxColumnNameLength, useShortPrefixes))
+      .toMap
 
-  private def extractFromUnstruct(unstruct: UnstructEvent, entitiesToSkip: List[SchemaCriterion]): Map[String, Json] =
-    UnstructEvent(filterOutEntities(unstruct.data, entitiesToSkip)).toShreddedJson.toMap
+    val contextColumns = contexts
+      .groupBy { case (te, _) => columnNames(te) }
+      .map { case (column, entities) =>
+        column -> Json.fromValues(entities.map { case (_, sdd) => addSchemaVersion(sdd) })
+      }
+
+    val unstruct = filterOutEntities(event.unstruct_event.data, entitiesToSkip).map { sdd =>
+      TabledEntity.columnName(TabledEntity.forUnstructEvent(sdd.schema), maxColumnNameLength, useShortPrefixes) -> sdd.data
+    }
+
+    contextColumns ++ unstruct
+  }
+
+  // As in the Analytics SDK's `toShreddedJson`, the version overrides a `_schema_version` key in the data, and a
+  // non-object context is left as it is.
+  private def addSchemaVersion(sdd: SelfDescribingData[Json]): Json =
+    if (sdd.data.isObject)
+      sdd.data.deepMerge(Json.obj("_schema_version" -> Json.fromString(sdd.schema.version.asString)))
+    else
+      sdd.data
 
   private def filterOutEntities[Entities[_]: FunctorFilter](
     entities: Entities[SelfDescribingData[Json]],

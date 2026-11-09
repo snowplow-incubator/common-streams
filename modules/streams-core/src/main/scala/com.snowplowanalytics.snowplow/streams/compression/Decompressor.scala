@@ -45,13 +45,31 @@ abstract class Decompressor private (maxBytesSinglePayload: Int, stream: InputSt
    *   Hopefully the next decompressed record, or the end of records. Might return a `RecordTooBig`
    *   or `CorruptInput` if something unexpected went wrong.
    */
+  /*
+   * On exception handling in this class:
+   *
+   * `CorruptInput` means "these bytes are not valid Snowplow-framed compressed data", and it sends
+   * the customer's payload to the failed events stream. So we only ever convert `IOException` into
+   * it, because that is the single channel by which our decompressing streams report bad bytes:
+   * every method of `ZstdInputStreamNoFinalizer` and `GZIPInputStream` that we call declares
+   * `throws IOException`, and zstd-jni's `ZstdException extends RuntimeException` is confined to
+   * its one-shot and `Ctx` APIs, which we do not use.
+   *
+   * Deliberately *not* catching `NonFatal` here. Any other exception would mean a bug in this class
+   * or a resource problem in the JVM, neither of which is evidence that the customer's data is bad.
+   * Turning those into bad rows would silently discard good data and hide the real fault, so we let
+   * them crash the app instead. Where a `RuntimeException` was genuinely reachable — a negative
+   * record size reaching `new Array[Byte]` — it is prevented below rather than caught.
+   */
+
   def getNextRecord: GetRecordResult = {
     val either = for {
       nextSize <- readNextSize
-      _ <- if (nextSize > maxBytesSinglePayload) {
-             stream.skip(nextSize.toLong)
-             Left(RecordTooBig(nextSize))
-           } else Right(())
+      // A negative size means the record framing is garbage: we cannot resync, so abandon the
+      // message. Checked explicitly, because it would otherwise reach `new Array[Byte](nextSize)`
+      // in readBytes and throw NegativeArraySizeException, which is not an IOException.
+      _ <- if (nextSize < 0) Left(CorruptInput) else Right(())
+      _ <- if (nextSize > maxBytesSinglePayload) skipRecord(nextSize) else Right(())
       bytes <- readBytes(nextSize)
     } yield Record(bytes)
 
@@ -75,6 +93,27 @@ abstract class Decompressor private (maxBytesSinglePayload: Int, stream: InputSt
         Left(CorruptInput)
     }
 
+  /**
+   * Advances the stream past a record which is too big to emit.
+   *
+   * Always returns a `Left`, because there is no record to yield either way: `RecordTooBig` if we
+   * managed to skip the record and the decompressor is still usable for the records that follow, or
+   * `CorruptInput` if the underlying stream could not be advanced.
+   *
+   * `nextSize` is always positive here, because `getNextRecord` has already rejected negative sizes
+   * and only calls this when the size exceeds `maxBytesSinglePayload`.
+   */
+  private def skipRecord(nextSize: Int): Either[GetRecordResult, Unit] =
+    try {
+      stream.skip(nextSize.toLong)
+      Left(RecordTooBig(nextSize))
+    } catch {
+      case _: IOException =>
+        Left(CorruptInput)
+    }
+
+  // `nextSize` is always between 0 and `maxBytesSinglePayload` here, so the allocation is both
+  // legal and bounded.
   private def readBytes(nextSize: Int): Either[CorruptInput.type, Array[Byte]] =
     try {
       val arr     = new Array[Byte](nextSize)
@@ -158,6 +197,17 @@ object Decompressor {
    */
   case class UnsupportedVersionsInHeader(v1: Int, v2: Int) extends FactoryResult
 
+  /**
+   * The result of trying to open a `Decompressor` when the compressed bytes could not be read at
+   * all, e.g. the message is truncated so severely that not even the two header bytes can be
+   * decompressed.
+   *
+   * This is the same class of problem as [[CorruptInput]], but detected while opening the
+   * decompressor rather than while reading records from it. It is reported separately only so the
+   * resulting bad row says where decompression gave up.
+   */
+  case object CorruptHeader extends FactoryResult
+
   /** Factory class for opening new `Decompressor`s from an incoming `ByteBuffer` */
   abstract class Factory private[Decompressor] (maxBytesSinglePayload: Int) {
 
@@ -176,21 +226,45 @@ object Decompressor {
     // Close the specific type decompressing stream, to release resources
     protected def closeStream(dStream: DStream): Unit
 
-    def build(input: ByteBuffer): FactoryResult = {
-      val stream = decompressorStream(new ByteBufferInputStream(input))
-      val v1     = stream.read()
-      val v2     = stream.read()
-      if (v1 === 1) {
-        val decompressor = new Decompressor(maxBytesSinglePayload, stream) {
-          override def close(): Unit = closeStream(stream)
+    /**
+     * Opens a decompressor over the given compressed bytes.
+     *
+     * Total with respect to malformed input: a buffer that cannot be decompressed yields
+     * [[CorruptHeader]] rather than throwing, so a single bad message cannot take down the
+     * application.
+     *
+     * As elsewhere in this class, only `IOException` is treated as evidence of bad bytes. Both
+     * `ZstdInputStreamNoFinalizer` and `GZIPInputStream` report malformed input that way, including
+     * from their constructors. Anything else propagates.
+     */
+    def build(input: ByteBuffer): FactoryResult =
+      try {
+        // Opening the stream can itself throw, because GZIPInputStream reads the gzip header in its constructor
+        val stream = decompressorStream(new ByteBufferInputStream(input))
+        try {
+          val v1 = stream.read()
+          val v2 = stream.read()
+          if (v1 === 1) {
+            val decompressor = new Decompressor(maxBytesSinglePayload, stream) {
+              override def close(): Unit = closeStream(stream)
+            }
+            FactorySuccess(decompressor, payloadVersion = v2)
+          } else {
+            closeStream(stream)
+            // The Snowplow specification tells us to stop decompression if we don't recognize the compression format version
+            UnsupportedVersionsInHeader(v1, v2)
+          }
+        } catch {
+          case _: IOException =>
+            // Nothing else will release the native resources held by the stream, because the caller
+            // never gets a Decompressor to close.
+            closeStream(stream)
+            CorruptHeader
         }
-        FactorySuccess(decompressor, payloadVersion = v2)
-      } else {
-        closeStream(stream)
-        // The Snowplow specification tells us to stop decompression if we don't recognize the compression format version
-        UnsupportedVersionsInHeader(v1, v2)
+      } catch {
+        case _: IOException =>
+          CorruptHeader
       }
-    }
 
   }
 

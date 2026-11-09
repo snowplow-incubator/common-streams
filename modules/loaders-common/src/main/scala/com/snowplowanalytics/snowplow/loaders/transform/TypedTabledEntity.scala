@@ -114,7 +114,7 @@ object TypedTabledEntity {
     field.map(_.copy(accessors = Set.empty))
   }
 
-  private def keyToSubVersion(key: SchemaKey): SchemaSubVersion = (key.version.revision, key.version.addition)
+  private[transform] def keyToSubVersion(key: SchemaKey): SchemaSubVersion = (key.version.revision, key.version.addition)
 
   private def addSchemaVersionKey(field: Field): Field = {
     val fieldType = field.fieldType match {

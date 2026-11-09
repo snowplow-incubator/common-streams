@@ -118,7 +118,11 @@ class CompressionRoundtripSpec extends Specification with CatsEffect with ScalaC
         IO {
           c.reset(TestPayloadVersion, targetSize)
           val accepted = records.takeWhile(r => c.addRecord(r, 0, r.length))
-          if (accepted.isEmpty) true
+          if (accepted.isEmpty)
+            scala.util.Try(c.result) match {
+              case scala.util.Failure(_: IllegalStateException) => true
+              case _                                            => false
+            }
           else {
             val compressed = c.result
             decompressorFactory.build(compressed) match {

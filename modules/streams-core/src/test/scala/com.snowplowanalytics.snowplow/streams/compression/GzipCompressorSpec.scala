@@ -28,8 +28,8 @@ class GzipCompressorSpec extends Specification with CatsEffect {
     handle boundary case at exact target size                 $g7
     reject record that exceeds target size by one byte        $g8
     handle large records                                      $g9
-    produce expected bytes when no records added              $g10
-    produce invalid output when first record is rejected      $g11
+    throw on result when no records added                     $g10
+    throw on result when first record is rejected             $g11
   """
 
   def g1 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
@@ -145,23 +145,8 @@ class GzipCompressorSpec extends Specification with CatsEffect {
   }
 
   def g10 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 1000) { compressor =>
-    val compressed = compressor.result
-
-    val bytes = new Array[Byte](compressed.remaining())
-    compressed.get(bytes)
-
-    // Known issue: CRC32 is zeroed because CommittableCRC32 is never committed
-    // during initialize(). See PDP-2613.
-    // Gzip header (10 bytes)              — static, written by GZIPOutputStream constructor
-    // Deflate of header [1, 42] (4 bytes) — Snowplow header compressed by deflater
-    // CRC32 (4 bytes)                     — zeroed (PDP-2613)
-    // Uncompressed size (4 bytes)         — 2 bytes of Snowplow header [1, 42]
-    // Note: byte 9 (OS field) is platform-dependent: 0xFF on macOS, 0x00 on Linux
-    val osByte: Byte = if (System.getProperty("os.name").toLowerCase.contains("linux")) 0 else -1
-    val expected     = Array[Byte](31, -117, 8, 0, 0, 0, 0, 0, 0, osByte, 99, -44, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0)
-
     (compressor.recordCount must beEqualTo(0): MatchResult[Any]) and
-      (bytes must beEqualTo(expected))
+      (compressor.result must throwAn[IllegalStateException])
   }
 
   def g11 = withCompressor(CompressorFactory.gzip(6), TestPayloadVersion, 10) { compressor =>
@@ -170,6 +155,6 @@ class GzipCompressorSpec extends Specification with CatsEffect {
     val isAdded = compressor.addRecord(largeRecord, 0, largeRecord.length)
 
     (isAdded must beFalse: MatchResult[Any]) and
-      (compressor.result must throwAn[IndexOutOfBoundsException]("null"))
+      (compressor.result must throwAn[IllegalStateException])
   }
 }

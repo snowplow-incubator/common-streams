@@ -103,6 +103,7 @@ class TransformStructuredSpec extends Specification {
       Cast error for unstruct (integer passed in string field) $unstructWrongType
       Cast error for context (integer passed in string field) $contextWrongType
       Iglu error in batch info becomes iglu transformation error $igluErrorInBatchInfo
+      Iglu error for a missing sub-version fails only events carrying that sub-version $igluErrorForMissingSubVersion
       All failing entity columns are reported, in column order $multipleEntityErrors
       Error for a recovery column reports its own sub-version $recoveryColumnErrorUsesOwnSubVersion
       Error for a merged column reports the highest sub-version in the batch $mergedColumnErrorUsesMaxSubVersion
@@ -584,6 +585,31 @@ class TransformStructuredSpec extends Specification {
     )
 
     assertLoaderError(inputEvent, batchInfo, expectedErrors = List(igluResolutionError))
+  }
+
+  def igluErrorForMissingSubVersion = {
+    val tabledEntity = TabledEntity(TabledEntity.UnstructEvent, "com.example", "mySchema", 1)
+
+    val igluResolutionError = FailureDetails.LoaderIgluError.IgluError(
+      SchemaKey("com.example", "mySchema", "jsonschema", Full(1, 0, 1)),
+      ResolutionError(SortedMap.empty)
+    )
+
+    // As returned by NonAtomicFields.resolveTypes when 1-0-1 is missing from the series: the
+    // family is in both `fields` and `igluFailures`
+    val batchInfo = Result(
+      fields       = Vector(mySchemaUnstruct(model = 1, subVersions = Set((0, 0), (1, 0)))),
+      igluFailures = List(ColumnFailure(tabledEntity, Set((0, 1)), igluResolutionError))
+    )
+
+    val missingEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-0-1")))
+    val goodEvent =
+      createEvent(unstruct = Some(sdj(data = json"""{ "my_string": "abc"}""", key = "iglu:com.example/mySchema/jsonschema/1-1-0")))
+    val expectedOutput = List(NamedValue(name = "unstruct_event_com_example_my_schema_1", value = json"""{ "my_string": "abc"}"""))
+
+    assertLoaderError(missingEvent, batchInfo, expectedErrors    = List(igluResolutionError)) and
+      assertSuccessful(goodEvent, batchInfo, expectedAllEntities = expectedOutput)
   }
 
   def entityColumnOrder = {
