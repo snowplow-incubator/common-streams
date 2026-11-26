@@ -19,7 +19,7 @@ import org.testcontainers.containers.localstack.LocalStackContainer
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain
 import software.amazon.awssdk.regions.Region
 
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
 import com.snowplowanalytics.snowplow.streams.kinesis.KinesisFactory
 
 import Utils._
@@ -50,7 +50,7 @@ class KinesisSinkSpec extends CatsResource[IO, (Region, LocalStackContainer, Sin
 
   def e1 = withResource { case (region, localstack, testSink) =>
     val testPayload = "test-payload"
-    val testInput   = ListOfList.ofItems(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
+    val testInput   = List(Sinkable(testPayload.getBytes(), Some("myPk"), Map(("", ""))))
 
     for {
       kinesisClient <- getKinesisClient(localstack.getEndpoint, region)

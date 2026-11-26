@@ -7,122 +7,56 @@
  */
 package com.snowplowanalytics.snowplow.streams
 
-import fs2.Chunk
-import cats.implicits._
 import cats.{Eval, Foldable, Monad, Monoid}
-import scala.collection.compat._
 
 /**
- * A data structure that is efficient for most Snowplow streaming apps
+ * An accumulator of sub-batches, for building a large batch cheaply and then folding over it.
  *
- * This is implemented as a `List[List[A]]`. But the inner Lists are hidden from the developer, so
- * to force us into only using efficient methods.
- *
- * A `ListOfList` has these features:
- *
- *   - **Fast prepend** when building bigger batches from smaller batches e.g.
- *     `batchesOfEvents.prepend(anotherBatch)`.
- *   - **Fast folding** e.g. Foldable[ListOfList].foldMap(batches)(event => ???)
- *
- * It is ideal for situations where:
- *
- *   - We don't care about order of events within a batch
- *   - We want to minimize how often we copy data structures
- *   - We don't need fast lookup by index
- *   - We want to batch up small batches into large batches of events
- *
- * It is deliberately missing a few features, so to force us into efficient usage patterns:
- *
- *   - No `.size` or `.length` methods. In Snowplow apps we manage batch size by other means.
- *   - No `.traverse`. Instead we can use:
- *
- * ```
- * Foldable[ListOfList].traverseUnordered(listOfList)(a => IO { ??? })
- * ```
+ * It is a `List[List[A]]`, where each inner list is one sub-batch. It is designed for
+ * `BatchUp.Batchable.combine`, where small batches arrive one at a time: `prepend` adds a sub-batch
+ * in O(1), without copying the elements already accumulated. Each method states its own cost.
  */
-class ListOfList[+A](private val value: List[List[A]]) extends AnyVal {
+class ListOfList[+A](protected val lists: List[List[A]]) extends AnyVal with ListOfListVersionSpecific[A] {
 
-  def isEmpty: Boolean = value.forall(_.isEmpty)
+  /** O(k) in the number of sub-batches */
+  def isEmpty: Boolean = lists.forall(_.isEmpty)
 
-  /** Fast prepend a batch to the beginning of this ListOfList */
+  /** Prepends a sub-batch in O(1), without copying anything */
   def prepend[B >: A](elems: List[B]): ListOfList[B] =
-    ListOfList.of(elems :: value)
+    ListOfList.of(elems :: lists)
 
   /**
-   * Apply a transformation function `f` to every element in the ListOfList
+   * The number of elements.
    *
-   * The resulting `ListOfList` does not have the same order as the input List. This is helpful in
-   * Snowplow apps where order of events within batches is not important.
+   * O(n + k) in the number of elements and sub-batches: it walks every sub-batch, without copying.
+   * The size is not cached, so each call walks the batch again.
    */
-  def mapUnordered[B](f: A => B): ListOfList[B] =
-    ListOfList.of {
-      List {
-        value.foldLeft(List.empty[B]) { case (bs, list) =>
-          list.foldLeft(bs) { case (bs, a) =>
-            f(a) :: bs
-          }
-        }
-      }
-    }
+  def size: Int =
+    lists.foldLeft(0)(_ + _.size)
 
   /**
-   * An `Iterable` which is a lightweight wrapper over the underlying `ListOfList`.
+   * Applies `f` to every element, eagerly.
    *
-   * This is efficient because it does not do a copy of the data structure
+   * A single pass over the elements, allocating one new cons cell per element and no intermediate
+   * collections. The sub-batch structure is kept.
    */
-  def asIterable: Iterable[A] =
-    Iterable.from(value.foldLeft[Iterator[A]](Iterator.empty)(_ ++ _))
+  def map[B](f: A => B): ListOfList[B] =
+    ListOfList.of(lists.map(_.map(f)))
 
   /**
-   * Converts the ListOfList to a `fs2.Chunk`.
+   * Copies every element, in order, into a new `IndexedSeq`, in a single pass.
    *
-   * This does an inefficient copy of the underlying data, and so should only be used when a 3rd
-   * party library requires a `Chunk`.
+   * Use it only when something needs fast lookup by index; to traverse the elements, use `view` or
+   * fold instead.
    */
-  def copyToChunk: Chunk[A] =
-    Chunk.from(value).flatMap(Chunk.from(_))
-
-  /**
-   * Converts the ListOfList to an IndexedSeq
-   *
-   * This does an inefficient copy of the underlying data, and so should only be used when we need
-   * to fast lookup by index, for a range of indexes.
-   */
-  def copyToIndexedSeq: IndexedSeq[A] =
-    asIterable.toIndexedSeq
-
-  /**
-   * This function takes a list of records and splits it into several lists, where each list is as
-   * big as possible with respecting the record limit and the size limit.
-   */
-  def group(
-    recordLimit: Int,
-    sizeLimit: Int,
-    getRecordSize: A => Int
-  ): List[List[A]] = {
-    import ListOfList.GroupAcc
-
-    this
-      .foldLeft(List.empty[GroupAcc[A]]) { case (acc, record) =>
-        val recordSize = getRecordSize(record)
-        acc match {
-          case head :: tail =>
-            if (head.count + 1 > recordLimit || head.size + recordSize > sizeLimit)
-              List(GroupAcc(recordSize, 1, List(record))) ++ List(head) ++ tail
-            else
-              List(GroupAcc(head.size + recordSize, head.count + 1, record :: head.records)) ++ tail
-          case Nil =>
-            List(GroupAcc(recordSize, 1, List(record)))
-        }
-      }
-      .map(_.records)
+  def copyToIndexedSeq: IndexedSeq[A] = {
+    val builder = Vector.newBuilder[A]
+    lists.foreach(builder ++= _)
+    builder.result()
   }
 }
 
 object ListOfList {
-
-  def ofItems[A](elems: A*): ListOfList[A] =
-    new ListOfList(List(List(elems: _*)))
 
   def ofLists[A](elems: List[A]*): ListOfList[A] =
     new ListOfList(List(elems: _*))
@@ -136,10 +70,18 @@ object ListOfList {
   implicit def listOfListFoldable: Foldable[ListOfList] = new Foldable[ListOfList] {
 
     override def toIterable[A](fa: ListOfList[A]): Iterable[A] =
-      fa.asIterable
+      fa.view
+
+    /**
+     * cats' default `foldMap` combines one element at a time, which is O(n²) for monoids whose
+     * `combine` copies the accumulator (`List`, `Vector`, `String`...). `combineAll` lets the
+     * monoid build its result in a single linear pass.
+     */
+    override def foldMap[A, B](fa: ListOfList[A])(f: A => B)(implicit B: Monoid[B]): B =
+      B.combineAll(fa.lists.iterator.flatMap(_.iterator).map(f))
 
     override def foldLeft[A, B](fa: ListOfList[A], b: B)(f: (B, A) => B): B =
-      fa.value.foldLeft(b) { case (acc, list) =>
+      fa.lists.foldLeft(b) { case (acc, list) =>
         list.foldLeft(acc)(f)
       }
 
@@ -150,11 +92,8 @@ object ListOfList {
           case Nil :: rest      => loop(rest)
           case (h :: t) :: rest => f(h, Eval.defer(loop(t :: rest)))
         }
-      Eval.defer(loop(fa.value))
+      Eval.defer(loop(fa.lists))
     }
-
-    override def foldMap[A, B](fa: ListOfList[A])(f: A => B)(implicit B: Monoid[B]): B =
-      B.combineAll(toIterable(fa).map(f))
 
     override def foldM[G[_], A, B](fa: ListOfList[A], z: B)(f: (B, A) => G[B])(implicit G: Monad[G]): G[B] = {
       def step(in: (List[A], List[List[A]], B)): G[Either[(List[A], List[List[A]], B), B]] =
@@ -167,17 +106,11 @@ object ListOfList {
             }
         }
 
-      fa.value match {
+      fa.lists match {
         case Nil    => G.pure(z)
         case h :: t => G.tailRecM((h, t, z))(step)
       }
     }
 
   }
-
-  private case class GroupAcc[A](
-    size: Int,
-    count: Int,
-    records: List[A]
-  )
 }

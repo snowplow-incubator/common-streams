@@ -63,7 +63,7 @@ object Dependencies {
     val specs2           = "4.20.0"
     val catsEffectSpecs2 = "1.7.0"
     val localstack       = "1.21.4"
-    val eventGen         = "0.7.0"
+    val eventGen         = "0.11.0"
     val dockerJava       = "3.7.0"
 
     // Compiler plugins

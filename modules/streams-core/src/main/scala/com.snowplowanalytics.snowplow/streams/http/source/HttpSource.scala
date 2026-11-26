@@ -61,6 +61,9 @@ object HttpSource {
         httpStream(queue)
 
       def debounceCheckpoints: FiniteDuration = Duration.Zero
+
+      // There is no upstream to give batches back to.
+      override def releaseUnemitted: F[Unit] = Sync[F].unit
     }
 
   private def noOpCheckpointer[F[_]: Applicative]: Checkpointer[F, Unit] =

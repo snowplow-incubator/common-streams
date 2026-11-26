@@ -16,12 +16,22 @@ trait Sink[F[_]] {
 
   /**
    * Writes a batch of events to the external sink, handling partition keys and message attributes
+   *
+   * Pass `Sinkable`s that are already built. A view over a strictly mapped `ListOfList` (e.g.
+   * `batch.map(serialize).view`) is the cheap way to do that. Don't leave expensive transformations
+   * inside a lazy view: the sink decides where and how often `batch` is traversed, so deferred work
+   * may run on the sink's own threads, or more than once.
    */
-  def sink(batch: ListOfList[Sinkable]): F[Unit]
+  def sink(batch: Iterable[Sinkable]): F[Unit]
 
-  /** Writes a batch of events to the sink using an empty partition key and attributes */
-  def sinkSimple(batch: ListOfList[Array[Byte]]): F[Unit] =
-    sink(batch.mapUnordered(Sinkable(_, None, Map.empty)))
+  /**
+   * Writes a batch of events to the sink using an empty partition key and attributes
+   *
+   * The `Sinkable`s are built lazily, through a view over `batch`, so no intermediate collection is
+   * allocated.
+   */
+  def sinkSimple(batch: Iterable[Array[Byte]]): F[Unit] =
+    sink(batch.view.map(Sinkable(_, None, Map.empty)))
 
   /**
    * Ping the external resource to check it is healthy and ready to receive events

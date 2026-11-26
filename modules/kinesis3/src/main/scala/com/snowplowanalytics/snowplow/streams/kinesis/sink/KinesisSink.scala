@@ -38,7 +38,8 @@ import java.nio.charset.StandardCharsets.UTF_8
 
 import scala.jdk.CollectionConverters._
 
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.internal.RecordGrouping
 
 private[kinesis] object KinesisSink {
 
@@ -48,7 +49,7 @@ private[kinesis] object KinesisSink {
   ): Resource[F, Sink[F]] =
     mkProducer[F](config, client).map { p =>
       new Sink[F] {
-        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+        def sink(batch: Iterable[Sinkable]): F[Unit] =
           writeToKinesis[F](
             config.throttledBackoffPolicy,
             RequestLimits(config.recordLimit, config.byteLimit),
@@ -119,8 +120,8 @@ private[kinesis] object KinesisSink {
     Logger[F].info(s"Checking whether stream $streamName has open shards") >> go(None)
   }
 
-  private def toKinesisRecords(records: ListOfList[Sinkable]): ListOfList[PutRecordsRequestEntry] =
-    records.mapUnordered { r =>
+  private def toKinesisRecords(records: Iterable[Sinkable]): List[PutRecordsRequestEntry] =
+    records.iterator.map { r =>
       val data = SdkBytes.fromByteArrayUnsafe(r.bytes)
       val prre = PutRecordsRequestEntry
         .builder()
@@ -128,7 +129,7 @@ private[kinesis] object KinesisSink {
         .data(data)
         .build()
       prre
-    }
+    }.toList
 
   /**
    * The result of trying to write a batch to kinesis
@@ -213,24 +214,24 @@ private[kinesis] object KinesisSink {
     requestLimits: RequestLimits,
     kinesis: KinesisAsyncClient,
     streamName: String,
-    records: ListOfList[Sinkable]
+    records: Iterable[Sinkable]
   ): F[Unit] = {
     val policyForThrottlingAndInternalErrors = Retries.forThrottling[F](throttlingErrorsPolicy)
 
     // First, tryWriteToKinesis - the AWS SDK will handle retries. If there are still failures after that, it will:
     // - return messages for retries if we only hit throttliing
     // - raise an error if we still have non-throttle failures after the SDK has carried out retries
-    def runAndCaptureFailures(ref: Ref[F, ListOfList[PutRecordsRequestEntry]]): F[TryBatchResult] =
+    def runAndCaptureFailures(ref: Ref[F, List[PutRecordsRequestEntry]]): F[TryBatchResult] =
       for {
         records <- ref.get
-        result <- records
-                    .group(requestLimits.recordLimit, requestLimits.bytesLimit, getRecordSize)
+        result <- RecordGrouping
+                    .group(records, requestLimits.recordLimit, requestLimits.bytesLimit)(getRecordSize)
                     .parTraverse(g => tryWriteToKinesis(streamName, kinesis, g))
                     .map(_.combineAll)
-        _ <- ref.set(ListOfList.ofLists(result.nextBatchAttempt))
+        _ <- ref.set(result.nextBatchAttempt)
       } yield result
     for {
-      ref <- Ref.of[F, ListOfList[PutRecordsRequestEntry]](toKinesisRecords(records))
+      ref <- Ref.of[F, List[PutRecordsRequestEntry]](toKinesisRecords(records))
       result <- runAndCaptureFailures(ref)
                   .retryingOnFailures(
                     policy        = policyForThrottlingAndInternalErrors,

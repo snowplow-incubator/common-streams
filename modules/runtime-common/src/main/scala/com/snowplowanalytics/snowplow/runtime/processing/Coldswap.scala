@@ -7,19 +7,34 @@
  */
 package com.snowplowanalytics.snowplow.runtime.processing
 
-import cats.effect.{Async, Ref, Resource, Sync}
+import cats.effect.{Async, Ref, Resource, Sync, Unique}
 import cats.effect.std.Semaphore
 import cats.implicits._
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 /**
- * Manages swapping of Resources
+ * Manages a lazily-opened Resource that is shared by concurrent fibers and replaced when a user
+ * finds it broken.
  *
- * Inspired by `cats.effect.std.Hotswap` but with differences. A Hotswap is "hot" because a `swap`
- * acquires the next resource before closing the previous one. Whereas this Coldswap is "cold"
- * because it always closes any previous Resources before acquiring the next one.
+ * Unlike `cats.effect.std.Hotswap`, this Coldswap is "cold": it always closes the previous resource
+ * before acquiring the next one.
  *
- * * '''Note''': The resource cannot be simultaneously open and closed, and so
- * `coldswap.opened.surround(coldswap.closed.use_)` will deadlock.
+ * The contract:
+ *   - Nothing is opened until the first `opened`. The resource then stays open and is shared by
+ *     every concurrent `opened` until it is invalidated, or until the Coldswap is finalized.
+ *   - `Lease.invalidate` marks the leased resource as broken without closing it. Fibers already
+ *     holding it carry on; new `opened` requests queue. When the last holder releases, the first
+ *     queued fiber closes the broken resource and opens a replacement.
+ *   - Never call `opened`, directly or through anything the block waits on, from inside an
+ *     `opened.use` block. If any fiber invalidates the resource in the meantime, the nested
+ *     `opened` waits for every holder to release, including the outer lease, and deadlocks. To
+ *     retry after invalidating, release the lease and call `opened` again.
+ *   - A lease only ever invalidates the resource it was handed. Invalidating through a lease whose
+ *     resource was already replaced is a no-op, so any number of invalidations of one resource
+ *     cause exactly one close and one open.
+ *   - An error from closing a broken resource is logged and swallowed, and the replacement still
+ *     opens. An error from closing a healthy resource on finalization is raised.
  */
 final class Coldswap[F[_]: Sync, A] private (
   sem: Semaphore[F],
@@ -29,81 +44,83 @@ final class Coldswap[F[_]: Sync, A] private (
   import Coldswap._
 
   /**
-   * Gets the current resource, or opens a new one if required. The returned `A` is guaranteed to be
-   * available for the duration of the `Resource.use` block.
+   * Leases the current resource, opening a replacement first if there is none or it is broken. The
+   * leased resource stays open for the duration of the `Resource.use` block.
    */
-  def opened: Resource[F, A] =
+  def opened: Resource[F, Lease[F, A]] =
     fiberLocalPermitManager(sem).evalMap { permitManager =>
-      // Must acquire a permit before attempting to access the resource.  Avoids conflicts with other concurrent fibers opening/closing the resource.
+      // Must acquire a permit before accessing the resource. Holding a permit blocks other fibers from closing it.
       (permitManager.acquireOnePermit *> ref.get).flatMap {
-        case Opened(a, _) => Sync[F].pure(a)
-        case Closed =>
+        case o @ Opened(_, _, _, false) => Sync[F].pure(leaseOf(o))
+        case _ =>
           for {
-            // Must acquire all permits before opening a new resource.  Avoids conflicts with other concurrent fibers that want to use the resource.
+            // Holding all permits means no other fiber is using the resource. Semaphore is FIFO, so
+            // waiting here also blocks every later `opened` from being handed the broken resource.
             _ <- permitManager.stepFromOneToAllPermits
-            // We have all permits.  Safe to open the resource; this will not conflict with another fiber.
-            a <- doOpen
-            // Release all-but-one permits, to unblock other concurrent fibers from calling `coldswap.opened.use` in parallel.
+            o <- doReplace
+            // Unblock other fibers waiting to use the resource.
             _ <- permitManager.stepFromAllToOnePermit
-          } yield a
+          } yield leaseOf(o)
       }
     }
 
-  /**
-   * Closes the resource if it was open. The resource is guaranteed to remain closed for the
-   * duration of the `Resource.use` block.
-   */
-  def closed: Resource[F, Unit] =
-    fiberLocalPermitManager(sem).evalMap { permitManager =>
-      // Must acquire a permit before inspecting the current state.  Avoids conflicts with other concurrent fibers opening/closing the resource.
-      (permitManager.acquireOnePermit *> ref.get).flatMap {
-        case Closed => Sync[F].unit
-        case Opened(_, _) =>
-          for {
-            // Must acquire all permits before opening a new resource.  Avoids open/close conflicts with other concurrent fibers.
-            _ <- permitManager.stepFromOneToAllPermits
-            // We have all permits.  Safe to close the resource; this will not conflict with another fiber.
-            _ <- doClose
-            // Release all-but-one permits, to unblock other concurrent fibers from calling `coldswap.closed.use` in parallel.
-            _ <- permitManager.stepFromAllToOnePermit
-          } yield ()
-      }
+  private def leaseOf(o: Opened[F, A]): Lease[F, A] =
+    new Lease[F, A] {
+      override val value: A = o.value
+      override val invalidate: F[Unit] =
+        ref.update {
+          case current @ Opened(_, _, token, _) if token == o.token => current.copy(broken = true)
+          case other                                                => other
+        }
+    }
+
+  /** Closes the resource if open. Used by the finalizer of `Coldswap.make`. */
+  private def shutdown: F[Unit] =
+    fiberLocalPermitManager(sem).use { permitManager =>
+      permitManager.acquireOnePermit *> permitManager.stepFromOneToAllPermits *> doClose
     }
 
   /**
-   * Closes the currently held resource, if open.
+   * Closes the currently held resource, if open. Errors are swallowed only if the resource is
+   * broken.
    *
    * This must strictly only be called after acquiring ALL permits from the semaphore. Otherwise, we
    * would close the resource while someone is still using it.
    */
   private def doClose: F[Unit] =
     ref.get.flatMap {
-      case Closed =>
-        // This is possible if another fiber called `doClose` while we were waiting for this fiber to acquire all the permits
-        Sync[F].unit
-      case Opened(_, close) =>
+      case Closed => Sync[F].unit
+      case o @ Opened(_, _, _, _) =>
         Sync[F].uncancelable { _ =>
+          val close =
+            if (o.broken)
+              o.close.handleErrorWith { e =>
+                Logger[F].warn(e)("Error closing a resource that was already invalidated. Ignoring.")
+              }
+            else o.close
           close *> ref.set(Closed)
         }
     }
 
   /**
-   * Opens a new resource if currently closed.
+   * Returns the current resource if it is healthy. Otherwise closes it, if open, and opens a new
+   * one.
    *
    * This must strictly only be called after acquiring ALL permits from the semaphore. Otherwise, we
-   * would open the resource while someone still requires it to be closed.
+   * would open or close the resource while someone is still using it.
    */
-  private def doOpen: F[A] =
+  private def doReplace: F[Opened[F, A]] =
     ref.get.flatMap {
-      case Opened(a, _) =>
-        // This is possible if another fiber called `doOpen` while we were waiting for this fiber to acquire all the permits
-        Sync[F].pure(a)
-      case Closed =>
-        Sync[F].uncancelable { poll =>
+      // Another fiber replaced it while this fiber was waiting for all the permits
+      case o @ Opened(_, _, _, false) => Sync[F].pure(o)
+      case _ =>
+        doClose *> Sync[F].uncancelable { poll =>
           for {
+            token <- Unique[F].unique
             (a, close) <- poll(resource.allocated)
-            _ <- ref.set(Opened(a, close))
-          } yield a
+            o = Opened(a, close, token, broken = false)
+            _ <- ref.set(o)
+          } yield o
         }
     }
 
@@ -111,16 +128,34 @@ final class Coldswap[F[_]: Sync, A] private (
 
 object Coldswap {
 
+  /**
+   * A resource handed out by `Coldswap.opened`, valid for the duration of the `use` block.
+   *
+   * `invalidate` marks this resource as broken so that it is replaced once every current holder has
+   * released it. It has no effect if the resource was already replaced.
+   */
+  sealed trait Lease[F[_], A] {
+    def value: A
+    def invalidate: F[Unit]
+  }
+
   private sealed trait State[+F[_], +A]
   private case object Closed extends State[Nothing, Nothing]
-  private case class Opened[F[_], A](value: A, close: F[Unit]) extends State[F, A]
+  private case class Opened[F[_], A](
+    value: A,
+    close: F[Unit],
+    token: Unique.Token,
+    broken: Boolean
+  ) extends State[F, A]
+
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   def make[F[_]: Async, A](resource: Resource[F, A]): Resource[F, Coldswap[F, A]] =
     for {
       sem <- Resource.eval(Semaphore[F](Long.MaxValue))
       ref <- Resource.eval(Ref.of[F, State[F, A]](Closed))
       coldswap = new Coldswap(sem, ref, resource)
-      _ <- Resource.onFinalize(coldswap.closed.use_)
+      _ <- Resource.onFinalize(coldswap.shutdown)
     } yield coldswap
 
   private sealed trait PermitState

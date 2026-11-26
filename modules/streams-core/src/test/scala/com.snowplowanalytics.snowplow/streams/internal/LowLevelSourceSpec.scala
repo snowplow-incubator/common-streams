@@ -9,7 +9,7 @@ package com.snowplowanalytics.snowplow.streams.internal
 
 import cats.implicits._
 import cats.effect.std.Queue
-import cats.effect.IO
+import cats.effect.{IO, Outcome, Resource}
 import cats.effect.kernel.{Ref, Unique}
 import cats.effect.testkit.TestControl
 import cats.effect.testing.specs2.CatsEffect
@@ -62,6 +62,16 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
       report no metric when there are no events and no liveness pings $latencyMetric1
       report zero latency when there are no events, but regular liveness pings $latencyMetric2
       report non-zero latency when the source emits timestamped events $latencyMetric3
+
+    When finalizing the source:
+      on cancellation with no windowing, checkpoint and nack before finalizing the source $finalize1
+      on cancellation mid-window, checkpoint and nack before finalizing the source $finalize2
+      on cancellation with an eager window overlapping a finalizing window, checkpoint both windows before finalizing the source $finalize3
+      on an error in an inner stream with timed windows, checkpoint the open window before finalizing the outer stream $finalize4
+      on an error in an inner stream with no windowing, checkpoint the open window before finalizing the outer stream $finalize5
+      on an error in the outer stream, still checkpoint the open window $finalize6
+      on an error raised by the event processor, nack before finalizing the source $finalize7
+      on an error in the source followed by a failing checkpoint, fail with the source's error $finalize8
   """
 
   def e1 = {
@@ -682,7 +692,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
 
     // A source that emits periodic liveness pings
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.awakeDelay[IO](1.second).map(_ => None))
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -706,7 +716,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
 
     // A source that emits nothing
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.never[IO])
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -802,7 +812,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
 
     // A source that emits one batch per inner stream, with a 5 minute "rebalancing" in between
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit] = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] =
         Stream.fixedDelay[IO](5.minutes).map { _ =>
@@ -828,7 +838,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
 
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
 
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.never[IO])
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -854,7 +864,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
 
     // A source that emits nothing
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.never[IO])
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -929,7 +939,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
   def latencyMetric1 = {
 
     // A source that emits nothing
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.never[IO])
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -953,7 +963,7 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
   def latencyMetric2 = {
 
     // A source that emits periodic liveness pings
-    val lowLevelSource = new LowLevelSource[IO, Unit] {
+    val lowLevelSource = new NoReleaseLowLevelSource[Unit] {
       def checkpointer: Checkpointer[IO, Unit]                         = Checkpointer.acksOnly[IO, Unit](_ => IO.unit)
       def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[Unit]]]] = Stream.emit(Stream.awakeDelay[IO](1.second).map(_ => None))
       def debounceCheckpoints: FiniteDuration                          = 42.seconds
@@ -1001,6 +1011,267 @@ class LowLevelSourceSpec extends Specification with CatsEffect {
     TestControl.executeEmbed(io)
   }
 
+  /** Specs for the order of checkpoints, nacks and the source's finalizers */
+
+  def finalize1 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 5.seconds,
+      timeToProcessBatch  = 7.seconds
+    )
+
+    val io = runFinalizingSource(config, testConfig, SourceFailures(), testProcessor(_, testConfig), 16.seconds)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:07Z", List("3", "4")),
+          Action.Checkpointed(List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:14Z", List("5", "6")),
+          Action.Checkpointed(List("3", "4")),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:21Z"),
+          Action.Checkpointed(List("5", "6")),
+          Action.Nacked(List("7", "8")),
+          Action.SourceInnerFinalized(1),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beNone)
+    }
+  }
+
+  def finalize2 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(60.seconds, 1.0, 2), _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val io = runFinalizingSource(config, testConfig, SourceFailures(), windowedProcessor(_, testConfig), 35.seconds)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:30Z", List("7", "8")),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:35Z"),
+          Action.Checkpointed(List("1", "2", "3", "4", "5", "6", "7", "8")),
+          Action.Nacked(Nil),
+          Action.SourceInnerFinalized(1),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beNone)
+    }
+  }
+
+  def finalize3 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(10.seconds, 1.0, numEagerWindows = 2), _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance  = Int.MaxValue,
+      eventsPerBatch       = 2,
+      timeBetweenBatches   = 4.seconds,
+      timeToProcessBatch   = 1.second,
+      timeToFinalizeWindow = 30.seconds
+    )
+
+    // Cancelled while the second window is open, and the first window is still finalizing
+    val io = runFinalizingSource(config, testConfig, SourceFailures(), windowedProcessor(_, testConfig), 15.seconds)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:04Z", List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:08Z", List("5", "6")),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:10Z"),
+          Action.ProcessorStartedWindow("1970-01-01T00:00:12Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:12Z", List("7", "8")),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:15Z"),
+          Action.Checkpointed(List("1", "2", "3", "4", "5", "6")),
+          Action.Checkpointed(List("7", "8")),
+          Action.Nacked(List("9", "10")),
+          Action.SourceInnerFinalized(1),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beNone)
+    }
+  }
+
+  def finalize4 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(60.seconds, 1.0, 2), _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val failures = SourceFailures(innerErrorAfterBatches = Some(3))
+
+    val io = runFinalizingSource(config, testConfig, failures, windowedProcessor(_, testConfig), 1.day)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.SourceInnerFinalized(1),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:30Z"),
+          Action.Checkpointed(List("1", "2", "3", "4", "5", "6")),
+          Action.Nacked(Nil),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beSome(InnerSourceError))
+    }
+  }
+
+  def finalize5 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val failures = SourceFailures(innerErrorAfterBatches = Some(3))
+
+    val io = runFinalizingSource(config, testConfig, failures, testProcessor(_, testConfig), 1.day)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.Checkpointed(List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.Checkpointed(List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.Checkpointed(List("5", "6")),
+          Action.SourceInnerFinalized(1),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:30Z"),
+          Action.Nacked(Nil),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beSome(InnerSourceError))
+    }
+  }
+
+  def finalize6 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(60.seconds, 1.0, 2), _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val failures = SourceFailures(outerErrorAfter = Some(25.seconds))
+
+    val io = runFinalizingSource(config, testConfig, failures, windowedProcessor(_, testConfig), 1.day)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.SourceInnerFinalized(1),
+          Action.SourceOuterFinalized,
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:25Z"),
+          Action.Checkpointed(List("1", "2", "3", "4", "5", "6")),
+          Action.Nacked(Nil)
+        )
+      )) and (error must beSome(OuterSourceError))
+    }
+  }
+
+  def finalize7 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.NoWindowing, _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val io = runFinalizingSource(config, testConfig, SourceFailures(), ref => badProcessor(testProcessor(ref, testConfig)), 1.day)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.Checkpointed(List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.Checkpointed(List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.Checkpointed(List("5", "6")),
+          Action.Nacked(List("7", "8")),
+          Action.SourceInnerFinalized(1),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beSome(ProcessorError))
+    }
+  }
+
+  def finalize8 = {
+
+    val config = EventProcessingConfig(EventProcessingConfig.TimedWindows(60.seconds, 1.0, 2), _ => IO.unit)
+
+    val testConfig = TestSourceConfig(
+      batchesPerRebalance = Int.MaxValue,
+      eventsPerBatch      = 2,
+      timeBetweenBatches  = 10.seconds,
+      timeToProcessBatch  = 1.second
+    )
+
+    val failures = SourceFailures(innerErrorAfterBatches = Some(3), failCheckpoints = true)
+
+    val io = runFinalizingSource(config, testConfig, failures, windowedProcessor(_, testConfig), 1.day)
+
+    TestControl.executeEmbed(io).map { case (actions, error) =>
+      (actions must beEqualTo(
+        Vector(
+          Action.ProcessorStartedWindow("1970-01-01T00:00:00Z"),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:00Z", List("1", "2")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:10Z", List("3", "4")),
+          Action.ProcessorReceivedEvents("1970-01-01T00:00:20Z", List("5", "6")),
+          Action.SourceInnerFinalized(1),
+          Action.ProcessorReachedEndOfWindow("1970-01-01T00:00:30Z"),
+          Action.Nacked(Nil),
+          Action.SourceOuterFinalized
+        )
+      )) and (error must beSome(InnerSourceError))
+    }
+  }
+
 }
 
 object LowLevelSourceSpec {
@@ -1012,6 +1283,9 @@ object LowLevelSourceSpec {
     case class ProcessorReachedEndOfWindow(timestamp: String) extends Action
     case class ProcessorReceivedEvents(timestamp: String, events: List[String]) extends Action
     case class Checkpointed(events: List[String]) extends Action
+    case class Nacked(events: List[String]) extends Action
+    case class SourceInnerFinalized(innerStreamId: Int) extends Action
+    case object SourceOuterFinalized extends Action
   }
 
   case class TestSourceConfig(
@@ -1087,7 +1361,7 @@ object LowLevelSourceSpec {
    *   - It uses a ref to record which events got checkpointed
    */
   def testLowLevelSource(ref: Ref[IO, Vector[Action]], config: TestSourceConfig): LowLevelSource[IO, List[String]] =
-    new LowLevelSource[IO, List[String]] {
+    new NoReleaseLowLevelSource[List[String]] {
       def checkpointer: Checkpointer[IO, List[String]] = Checkpointer.acksOnly[IO, List[String]] { toCheckpoint =>
         IO.sleep(1.nanos) *>
           ref.update(_ :+ Action.Checkpointed(toCheckpoint))
@@ -1119,6 +1393,130 @@ object LowLevelSourceSpec {
               .mergeHaltL(Stream.awakeDelay[IO](1.second).map(_ => None).repeat)
           }
         }
+      def debounceCheckpoints: FiniteDuration = config.debounceCheckpoints
+    }
+
+  val InnerSourceError = "inner source error"
+  val OuterSourceError = "outer source error"
+  val CheckpointError  = "checkpoint error"
+  val ProcessorError   = "boom! Exceeded 3 batches"
+
+  /**
+   * How a [[finalizingSource]] fails
+   *
+   * @param innerErrorAfterBatches
+   *   The first inner stream raises an error after emitting this many batches
+   * @param outerErrorAfter
+   *   The outer stream raises an error after this long
+   * @param failCheckpoints
+   *   Every ack raises an error
+   */
+  case class SourceFailures(
+    innerErrorAfterBatches: Option[Int]     = None,
+    outerErrorAfter: Option[FiniteDuration] = None,
+    failCheckpoints: Boolean                = false
+  )
+
+  /** A processor that throws an error after the 3rd batch it sees */
+  def badProcessor(inner: EventProcessor[IO]): EventProcessor[IO] = { in =>
+    Stream.eval(Queue.synchronous[IO, TokenedEvents]).flatMap { q =>
+      val str = in.zipWithIndex
+        .evalMap { case (tokenedEvents, batchId) =>
+          if (batchId >= 3)
+            IO.raiseError(new RuntimeException(ProcessorError))
+          else
+            q.offer(tokenedEvents)
+        }
+      inner(Stream.fromQueueUnterminated(q)).concurrently(str)
+    }
+  }
+
+  /**
+   * Runs a [[finalizingSource]] for a fixed time, then cancels it if it is still running
+   *
+   * @return
+   *   The recorded actions, and the message of the error the stream failed with, if any
+   */
+  def runFinalizingSource(
+    config: EventProcessingConfig[IO],
+    testConfig: TestSourceConfig,
+    failures: SourceFailures,
+    processor: Ref[IO, Vector[Action]] => EventProcessor[IO],
+    runFor: FiniteDuration
+  ): IO[(Vector[Action], Option[String])] =
+    for {
+      refActions <- Ref[IO].of(Vector.empty[Action])
+      sourceAndAck <- LowLevelSource.toSourceAndAck(finalizingSource(refActions, testConfig, failures))
+      fiber <- sourceAndAck.stream(config, processor(refActions)).compile.drain.start
+      _ <- IO.sleep(runFor)
+      _ <- fiber.cancel
+      outcome <- fiber.join
+      result <- refActions.get
+    } yield {
+      val error = outcome match {
+        case Outcome.Errored(e) => Some(e.getMessage)
+        case _                  => None
+      }
+      (result, error)
+    }
+
+  /**
+   * A LowLevelSource which records when its outer and inner streams are finalized, and what gets
+   * nacked.
+   *
+   * The finalizers are nested below the point where the streams are emitted, like the resources of
+   * a real source.
+   */
+  def finalizingSource(
+    ref: Ref[IO, Vector[Action]],
+    config: TestSourceConfig,
+    failures: SourceFailures
+  ): LowLevelSource[IO, List[String]] =
+    new NoReleaseLowLevelSource[List[String]] {
+      def checkpointer: Checkpointer[IO, List[String]] = new Checkpointer[IO, List[String]] {
+        def ack(c: List[String]): IO[Unit] =
+          IO.sleep(1.nanos) *> {
+            if (failures.failCheckpoints) IO.raiseError(new RuntimeException(CheckpointError))
+            else ref.update(_ :+ Action.Checkpointed(c))
+          }
+        def nack(c: List[String]): IO[Unit]                         = ref.update(_ :+ Action.Nacked(c))
+        def empty: List[String]                                     = Nil
+        def combine(x: List[String], y: List[String]): List[String] = x ++ y
+      }
+
+      def stream: Stream[IO, Stream[IO, Option[LowLevelEvents[List[String]]]]] = {
+        val outer = Stream.eval(Ref[IO].of(0)).flatMap { counter =>
+          val batch = Stream.eval {
+            (1 to config.eventsPerBatch).toList
+              .traverse(_ => counter.updateAndGet(_ + 1))
+              .map { numbers =>
+                val events  = numbers.map(_.toString)
+                val asBytes = Chunk.from(events).map(e => ByteBuffer.wrap(e.getBytes(StandardCharsets.UTF_8)))
+                Some(LowLevelEvents(events = asBytes, ack = events, earliestSourceTstamp = None))
+              }
+          }
+
+          Stream.iterate(1)(_ + 1).map { innerStreamId =>
+            val batches = failures.innerErrorAfterBatches match {
+              case Some(n) =>
+                (batch ++ Stream.sleep_[IO](config.timeBetweenBatches)).repeatN(n.toLong) ++
+                  Stream.raiseError[IO](new RuntimeException(InnerSourceError))
+              case None =>
+                (batch ++ Stream.sleep_[IO](config.timeBetweenBatches)).repeatN(config.batchesPerRebalance.toLong)
+            }
+            Stream.resource(Resource.onFinalize(ref.update(_ :+ Action.SourceInnerFinalized(innerStreamId)))) >>
+              batches.mergeHaltL(Stream.awakeDelay[IO](1.second).map(_ => None).repeat)
+          }
+        }
+
+        val withOuterError = failures.outerErrorAfter match {
+          case Some(t) => outer.concurrently(Stream.sleep[IO](t) >> Stream.raiseError[IO](new RuntimeException(OuterSourceError)))
+          case None    => outer
+        }
+
+        Stream.resource(Resource.onFinalize(ref.update(_ :+ Action.SourceOuterFinalized))) >> withOuterError
+      }
+
       def debounceCheckpoints: FiniteDuration = config.debounceCheckpoints
     }
 

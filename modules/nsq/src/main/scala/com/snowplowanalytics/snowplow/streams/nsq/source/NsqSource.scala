@@ -38,6 +38,11 @@ private[nsq] object NsqSource {
         def stream: fs2.Stream[F, fs2.Stream[F, Option[LowLevelEvents[Vector[Message]]]]] = nsqStream(config)
 
         def debounceCheckpoints: FiniteDuration = Duration.Zero
+
+        // NSQ could requeue its buffered messages individually, so this no-op is a deliberate trade-off:
+        // the source is deprecated, and its buffered messages are left to its usual shutdown handling,
+        // which redelivers them later than an early release would.
+        override def releaseUnemitted: F[Unit] = Sync[F].unit
       }
     }
 

@@ -19,10 +19,24 @@ import cats.{Applicative, Monoid}
  */
 private[streams] trait Checkpointer[F[_], C] extends Monoid[C] {
 
-  /** Trigger checkpointing. Must be called only when all message processing is complete */
+  /**
+   * Trigger checkpointing. Must be called only when all message processing is complete.
+   *
+   * The generic layer never calls `ack` after the source's streams are finalized, except that a
+   * stream which ended by itself or raised an error may already have been finalized. See the
+   * contract on `LowLevelSource.stream`.
+   */
   def ack(c: C): F[Unit]
 
-  /** Nack un-processed messages.  Used during shutdown */
+  /**
+   * Nack messages the event processor never reported as processed. Called at most once, when the
+   * stream returned by `SourceAndAck.stream` ends, possibly with nothing to nack. It is not called
+   * if that stream is cancelled before it starts.
+   *
+   * The generic layer calls it after the windows have finished, and before the source's streams are
+   * finalized, except that a stream which ended by itself or raised an error may already have been
+   * finalized. See the contract on `LowLevelSource.stream`.
+   */
   def nack(c: C): F[Unit]
 
 }

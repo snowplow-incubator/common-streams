@@ -18,17 +18,22 @@ class ListOfListSpec extends Specification {
     identify itself as empty $empty1
     produce an empty Iterable $empty2
     foldMap to an empty result $empty3
+    have size zero $empty4
+    copy to an empty IndexedSeq $empty5
 
   A non-empty ListOfList should
     provide an iterator covering all items in order $nonEmpty1
     allow prepending a batch $nonEmpty2
     map elements using a transformation lambda $nonEmpty3
-    copy to a fs2 Chunk comprising all items $nonEmpty4
+    count all items, including across empty inner lists $nonEmpty4
     copy to an IndexedSeq with the same order as the Iterable $nonEmpty5
     fold left over items $nonEmpty6
     fold right over items $nonEmpty7
     foldMap using a Monoid $nonEmpty8
     foldM using an Effect $nonEmpty9
+    provide a view which can be traversed more than once $nonEmpty10
+    expose the view through Foldable toIterable $nonEmpty11
+    foldMap using a collection Monoid $nonEmpty12
   """
 
   def empty1 = {
@@ -38,7 +43,7 @@ class ListOfListSpec extends Specification {
 
   def empty2 = {
     val input = ListOfList.empty
-    input.asIterable must beEmpty
+    input.view must beEmpty
   }
 
   def empty3 = {
@@ -48,10 +53,20 @@ class ListOfListSpec extends Specification {
     result must beEqualTo("")
   }
 
+  def empty4 = {
+    val input = ListOfList.of(List(Nil, Nil))
+    (ListOfList.empty.size must beEqualTo(0)) and (input.size must beEqualTo(0))
+  }
+
+  def empty5 = {
+    val input = ListOfList.of(List(Nil, Nil))
+    (ListOfList.empty.copyToIndexedSeq must beEmpty) and (input.copyToIndexedSeq must beEmpty)
+  }
+
   def nonEmpty1 = {
     val input    = ListOfList.of(List(List(1, 2, 3), List(4, 5, 6), Nil, List(7, 8, 9, 10)))
     val expected = List(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-    val result   = input.asIterable.toList
+    val result   = input.view.toList
 
     result must beEqualTo(expected)
   }
@@ -60,33 +75,30 @@ class ListOfListSpec extends Specification {
     val input    = ListOfList.of(List(List(1, 2, 3), List(4, 5, 6)))
     val addition = List(10, 11, 12)
     val expected = List(10, 11, 12, 1, 2, 3, 4, 5, 6)
-    val result   = input.prepend(addition).asIterable.toList
+    val result   = input.prepend(addition).view.toList
 
     result must beEqualTo(expected)
   }
 
   def nonEmpty3 = {
-    val input    = ListOfList.of(List(List(1, 2, 3), List(4, 5, 6)))
+    val input    = ListOfList.of(List(List(1, 2, 3), Nil, List(4, 5, 6)))
     val expected = List(100, 200, 300, 400, 500, 600)
-    val result   = input.mapUnordered(_ * 100).asIterable.toList
+    val result   = input.map(_ * 100).view.toList
 
     result must containTheSameElementsAs(expected)
   }
 
   def nonEmpty4 = {
-    val input    = ListOfList.of(List(List(1, 2, 3), List(4, 5, 6)))
-    val expected = List(1, 2, 3, 4, 5, 6)
-    val result   = input.copyToChunk.toList
-
-    result must containTheSameElementsAs(expected)
+    val input = ListOfList.of(List(List(1, 2, 3), Nil, List(4, 5, 6), List(7)))
+    input.size must beEqualTo(7)
   }
 
   def nonEmpty5 = {
-    val input   = ListOfList.of(List(List(1, 2, 3), List(4, 5, 6)))
+    val input   = ListOfList.of(List(List(1, 2, 3), Nil, List(4, 5, 6)))
     val result1 = input.copyToIndexedSeq.toVector
-    val result2 = input.asIterable.toVector
+    val result2 = input.view.toVector
 
-    result1 must beEqualTo(result2)
+    (result1 must beEqualTo(result2)) and (result1 must beEqualTo(Vector(1, 2, 3, 4, 5, 6)))
   }
 
   def nonEmpty6 = {
@@ -120,5 +132,24 @@ class ListOfListSpec extends Specification {
     }
 
     io.unsafeRunSync() must beEqualTo("init123456")
+  }
+
+  def nonEmpty10 = {
+    val input = ListOfList.of(List(List(1, 2), Nil, List(3)))
+    val view  = input.view
+
+    (view.toList must beEqualTo(List(1, 2, 3))) and (view.toList must beEqualTo(List(1, 2, 3)))
+  }
+
+  def nonEmpty11 = {
+    val input = ListOfList.of(List(List(1, 2), Nil, List(3)))
+    Foldable[ListOfList].toIterable(input).toList must beEqualTo(List(1, 2, 3))
+  }
+
+  def nonEmpty12 = {
+    val input  = ListOfList.of(List(List(1, 2, 3), Nil, List(4, 5, 6)))
+    val result = Foldable[ListOfList].foldMap(input)(i => List(i, i * 10))
+
+    result must beEqualTo(List(1, 10, 2, 20, 3, 30, 4, 40, 5, 50, 6, 60))
   }
 }

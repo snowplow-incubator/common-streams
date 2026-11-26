@@ -18,9 +18,8 @@ import com.snowplowanalytics.iglu.schemaddl.parquet.{Caster, Type}
 import com.snowplowanalytics.iglu.core.{SchemaCriterion, SchemaKey, SelfDescribingData}
 import com.snowplowanalytics.snowplow.badrows.{Processor => BadRowProcessor}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.{Event, SnowplowEvent}
-import com.snowplowanalytics.snowplow.eventgen.runGen
+import com.snowplowanalytics.snowplow.eventgen.{GenConfig, runGen}
 import com.snowplowanalytics.snowplow.eventgen.enrich.{SdkEvent => GenSdkEvent}
-import com.snowplowanalytics.snowplow.eventgen.protocol.event._
 import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts, UnstructEvent}
 
 import java.util.UUID
@@ -546,11 +545,23 @@ object TransformUnstructuredSpec {
     (1 to n).toList.flatMap(_ =>
       runGen(
         GenSdkEvent.gen(
-          eventPerPayloadMin  = 1,
-          eventPerPayloadMax  = 1,
-          now                 = Instant.now,
-          frequencies         = EventFrequencies(1, 1, 1, 1, 1, 1, UnstructEventFrequencies(1, 1, 1)),
-          generateEnrichments = true
+          eventsPerPayload = GenConfig.EventsPerPayload(1, 1),
+          time             = Instant.now,
+          frequencies = GenConfig.EventsFrequencies(
+            struct                        = 1,
+            unstruct                      = 1,
+            pageView                      = 1,
+            pagePing                      = 1,
+            transaction                   = 1,
+            transactionItem               = 1,
+            unstructEventFrequencyDefault = 0,
+            unstructEventFrequencies      = Map("change_form" -> 1, "funnel_interaction" -> 1, "link_click" -> 1)
+          ),
+          contexts            = GenConfig.ContextsPerEvent(0, 16),
+          generateEnrichments = true,
+          identitySource      = GenConfig.IdentitySource.NoIdentity,
+          duplicates          = None,
+          appIds              = List("web", "mobile", "server")
         ),
         new Random()
       )
@@ -566,12 +577,15 @@ object TransformUnstructuredSpec {
     // tests with Scala 2.12 as well, we can't use that method.
     (AtomicFields.static.map(_.name) zip values.toList).toMap +
       ("contexts" -> event.contexts) +
+      ("derived_contexts" -> event.derived_contexts) +
       ("unstruct_event" -> event.unstruct_event)
   }
 
   def getFieldValueFromEvent(eventMap: Map[String, Any], fieldName: String): Json =
     if (fieldName.startsWith("contexts_"))
-      eventMap("contexts").asInstanceOf[Contexts].toShreddedJson(fieldName)
+      Contexts(
+        eventMap("contexts").asInstanceOf[Contexts].data ::: eventMap("derived_contexts").asInstanceOf[Contexts].data
+      ).toShreddedJson(fieldName)
     else if (fieldName.startsWith("unstruct_"))
       eventMap("unstruct_event").asInstanceOf[UnstructEvent].toShreddedJson.get._2
     else

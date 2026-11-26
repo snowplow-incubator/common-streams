@@ -22,7 +22,8 @@ import com.google.protobuf.UnsafeSnowplowOps
 
 import com.snowplowanalytics.snowplow.streams.pubsub.{FutureInterop, PubsubSinkConfig}
 import com.snowplowanalytics.snowplow.streams.pubsub.PubsubRetryOps.implicits._
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.internal.RecordGrouping
 
 import scala.jdk.CollectionConverters._
 
@@ -38,7 +39,7 @@ private[pubsub] object PubsubSink {
   ): Resource[F, Sink[F]] =
     buildPublisherStub[F](transport, executor, credentials).map { stub =>
       new Sink[F] {
-        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+        def sink(batch: Iterable[Sinkable]): F[Unit] =
           sinkBatch[F](config, stub, batch)
 
         def isHealthy: F[Boolean] =
@@ -61,20 +62,20 @@ private[pubsub] object PubsubSink {
   private def sinkBatch[F[_]: Async](
     config: PubsubSinkConfig,
     stub: PublisherStub,
-    batch: ListOfList[Sinkable]
-  ): F[Unit] =
-    batch
-      .mapUnordered { case Sinkable(bytes, _, attributes) =>
-        PubsubMessage.newBuilder
-          .setData(UnsafeSnowplowOps.wrapBytes(bytes))
-          .putAllAttributes(attributes.asJava)
-          .build
-      }
-      .group(config.batchSize, config.requestByteThreshold, _.getSerializedSize())
-      .parTraverse_ { messages =>
+    batch: Iterable[Sinkable]
+  ): F[Unit] = {
+    val messages = batch.iterator.map { case Sinkable(bytes, _, attributes) =>
+      PubsubMessage.newBuilder
+        .setData(UnsafeSnowplowOps.wrapBytes(bytes))
+        .putAllAttributes(attributes.asJava)
+        .build
+    }.toList
+    RecordGrouping
+      .group(messages, config.batchSize, config.requestByteThreshold)(_.getSerializedSize())
+      .parTraverse_ { group =>
         val request = PublishRequest.newBuilder
           .setTopic(s"projects/${config.topic.projectId}/topics/${config.topic.topicId}")
-          .addAllMessages(messages.asJava)
+          .addAllMessages(group.asJava)
           .build
         val io = for {
           apiFuture <- Sync[F].delay(stub.publishCallable.futureCall(request))
@@ -82,6 +83,7 @@ private[pubsub] object PubsubSink {
         } yield ()
         io.retryingOnTransientGrpcFailures(config.retries.transientErrors.delay, config.retries.transientErrors.attempts)
       }
+  }
 
   /**
    * Builds the "Stub" which is the object from which we can call PubSub SDK methods

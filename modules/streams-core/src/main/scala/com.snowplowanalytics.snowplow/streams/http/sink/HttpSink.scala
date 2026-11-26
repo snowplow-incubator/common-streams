@@ -16,7 +16,7 @@ import org.http4s.client.Client
 import org.http4s.headers.`Content-Type`
 import org.http4s.{MediaType, Method, Request}
 
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
 
 import com.snowplowanalytics.snowplow.streams.http.HttpSinkConfig
 
@@ -26,8 +26,8 @@ object HttpSink {
     createHttpClient
       .map { httpClient =>
         new Sink[F] {
-          override def sink(batch: ListOfList[Sinkable]): F[Unit] =
-            batch.parTraverse_(sendRequest(config, httpClient, _))
+          override def sink(batch: Iterable[Sinkable]): F[Unit] =
+            batch.toList.parTraverse_(sendRequest(config, httpClient, _))
 
           override def isHealthy: F[Boolean] = Async[F].pure(true)
         }

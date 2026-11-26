@@ -1,3 +1,13 @@
+Version 0.29.0 (2026-11-17)
+--------------------------
+Coldswap: replace closed with a lease that can invalidate its resource (#83)
+Make ListOfList and Sink costs explicit (#84)
+Start no unary pull after PubSub's early release (#87)
+Release PubSub's un-emitted batches at the start of shutdown (#85)
+Make every eager window wait for its predecessor before it finishes (#82)
+Finalize a source's streams only after its windows have checkpointed (#81)
+Remove the plain-HTTP Snowplow Maven resolver (#79)
+
 Version 0.28.0 (2026-11-05)
 --------------------------
 Raise the default Pub/Sub parallelPullFactor to 2.0 (PDP-2978) (#77)

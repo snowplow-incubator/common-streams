@@ -39,6 +39,9 @@ private[kinesis] object KinesisSource {
           new KinesisCheckpointer[F](config.checkpointThrottledBackoffPolicy)
 
         def debounceCheckpoints: FiniteDuration = config.debounceCheckpoints
+
+        // Kinesis checkpoints positionally, by sequence number, so an early release gains nothing.
+        override def releaseUnemitted: F[Unit] = Sync[F].unit
       }
     }
 

@@ -18,7 +18,8 @@ import com.sproutsocial.nsq.{Client, ListBasedBalanceStrategy, Publisher}
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.internal.RecordGrouping
 import com.snowplowanalytics.snowplow.streams.nsq.Retries
 import com.snowplowanalytics.snowplow.streams.nsq.NsqSinkConfig
 
@@ -29,7 +30,7 @@ private[nsq] object NsqSink {
   def resource[F[_]: Async](config: NsqSinkConfig): Resource[F, Sink[F]] =
     mkPublisher[F](config).map { p =>
       new Sink[F] {
-        def sink(batch: ListOfList[Sinkable]): F[Unit] =
+        def sink(batch: Iterable[Sinkable]): F[Unit] =
           sinkBatch[F](p, config, batch)
 
         def isHealthy: F[Boolean] =
@@ -40,12 +41,12 @@ private[nsq] object NsqSink {
   private def sinkBatch[F[_]: Async](
     publisher: Publisher,
     config: NsqSinkConfig,
-    batch: ListOfList[Sinkable]
+    batch: Iterable[Sinkable]
   ): F[Unit] =
     Sync[F]
       .blocking {
-        batch
-          .group(recordLimit = Int.MaxValue, sizeLimit = config.byteLimit, getRecordSize = _.bytes.length)
+        RecordGrouping
+          .group(batch, recordLimit = Int.MaxValue, sizeLimit = config.byteLimit)(_.bytes.length)
           .foreach { l =>
             val records = l.map(_.bytes).asJava
             publisher.publish(config.topic, records)

@@ -20,6 +20,10 @@ package object streams {
    *
    * The [[SourceAndAck]] provides the [[EventProcessor]] with events and tokens. The
    * [[EventProcessor]] must emit the tokens after it has fully processed the events.
+   *
+   * An [[EventProcessor]] must consume its input to the end, including during shutdown, when the
+   * input ends early. If it completes before then, its window fails with an `IllegalStateException`
+   * ("The event processor finished before the end of its window").
    */
   type EventProcessor[F[_]] = Pipe[F, TokenedEvents, Unique.Token]
 

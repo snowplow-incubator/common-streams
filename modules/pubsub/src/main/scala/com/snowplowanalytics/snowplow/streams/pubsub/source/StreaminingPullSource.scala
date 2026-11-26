@@ -30,7 +30,9 @@ import java.util.UUID
 import scala.jdk.CollectionConverters._
 
 /**
- * An fs2 stream based around a GRPC streaming pull
+ * An fs2 stream based around a GRPC streaming pull. It is the source's fetch loop, which
+ * `PubsubSource` runs in the background and hands over to downstream, so the GRPC stream stays open
+ * until `PubsubSource`'s outer stream is finalized.
  *
  * Streaming pull is the better choice for apps with low latency requirements.
  */
@@ -38,25 +40,32 @@ private[source] object StreamingPullSource {
 
   private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
+  /**
+   * @param onFailure
+   *   Called with the error that stops the stream, before the stream raises it
+   */
   def stream[F[_]: Async](
     config: PubsubSourceConfig,
     stub: SubscriberStub,
-    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+    refStates: Ref[F, PubsubSourceState],
+    onFailure: Throwable => F[Unit]
   ): Stream[F, Option[LowLevelEvents[Vector[Unique.Token]]]] =
-    Stream.eval(Sync[F].delay(UUID.randomUUID)).flatMap { clientId =>
-      Stream
-        .resource(startStreamingPull(config, clientId, stub))
-        .flatMap { case (controller, queue) =>
-          Stream
-            .eval(pullAndManageState(config, stub, controller, queue, refStates))
-            .repeat
-            .collectWhile { case Right(ok) => ok }
-            .cons1(None)
-        }
-        .append(Stream.sleep_(config.retries.transientErrors.delay))
-        .repeat
-        .prefetch
-    }
+    Stream
+      .eval(Sync[F].delay(UUID.randomUUID))
+      .flatMap { clientId =>
+        Stream
+          .resource(startStreamingPull(config, clientId, stub))
+          .flatMap { case (controller, queue) =>
+            Stream
+              .eval(pullAndManageState(config, stub, controller, queue, refStates))
+              .repeat
+              .collectWhile { case Right(ok) => ok }
+              .cons1(None)
+          }
+          .append(Stream.sleep_(config.retries.transientErrors.delay))
+          .repeat
+      }
+      .handleErrorWith(e => Stream.exec(onFailure(e)) ++ Stream.raiseError[F](e))
 
   /**
    * Actions passed from the ResponseObserver callbacks to the main processing logic via a Queue.
@@ -84,7 +93,7 @@ private[source] object StreamingPullSource {
     stub: SubscriberStub,
     controller: StreamController,
     queue: QueueSource[F, SubscriberAction],
-    refStates: Ref[F, Map[Unique.Token, PubsubBatchState]]
+    refStates: Ref[F, PubsubSourceState]
   ): F[Either[Unit, Option[LowLevelEvents[Vector[Unique.Token]]]]] =
     Sync[F].uncancelable { _ =>
       for {
@@ -104,7 +113,7 @@ private[source] object StreamingPullSource {
                         _ <- Logger[F].debug(t)("Retryable error on PubSub streaming pull")
                       } yield Left(())
                     case SubscriberAction.Error(t) =>
-                      Logger[F].error(t)("Exception from PubSub streaming pull") >> Sync[F].raiseError(t)
+                      Sync[F].raiseError(t)
                   }
       } yield either
     }

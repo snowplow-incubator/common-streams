@@ -53,6 +53,9 @@ private[kafka] object KafkaSource {
         kafkaStream(config, kafkaConsumer)
 
       def debounceCheckpoints: FiniteDuration = config.debounceCommitOffsets
+
+      // Kafka checkpoints positionally, by committing offsets, so an early release gains nothing.
+      override def releaseUnemitted: F[Unit] = Sync[F].unit
     }
 
   type KafkaCheckpoints = Map[TopicPartition, OffsetAndMetadata]

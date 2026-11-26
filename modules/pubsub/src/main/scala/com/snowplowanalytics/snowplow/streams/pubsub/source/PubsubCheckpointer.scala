@@ -29,15 +29,15 @@ import com.snowplowanalytics.snowplow.streams.pubsub.PubsubRetryOps.implicits._
  *   Pubsub subscription name
  * @param stub
  *   The GRPC stub needed to execute the ack/nack RPCs
- * @param refState
- *   A map from tokens to the data held about a batch of messages received from pubsub. The map is
- *   wrapped in a `Ref` because it is concurrently modified by the source adding new batches to the
- *   state.
+ * @param refAckIds
+ *   The source's state, holding the data about each batch of messages received from pubsub. It is
+ *   wrapped in a `Ref` because the source concurrently adds, hands over and releases batches. The
+ *   checkpointer removes the batches it acks or nacks.
  */
 private class PubsubCheckpointer[F[_]: Async](
   config: PubsubSourceConfig,
   stub: SubscriberStub,
-  refAckIds: Ref[F, Map[Unique.Token, PubsubBatchState]]
+  refAckIds: Ref[F, PubsubSourceState]
 ) extends Checkpointer[F, Vector[Unique.Token]] {
 
   private implicit def logger: Logger[F] = Slf4jLogger.getLogger[F]
@@ -55,7 +55,7 @@ private class PubsubCheckpointer[F[_]: Async](
    */
   override def ack(c: Vector[Unique.Token]): F[Unit] =
     for {
-      ackDatas <- refAckIds.modify(m => (m -- c, c.flatMap(m.get)))
+      ackDatas <- refAckIds.modify(_.remove(c))
       _ <- ackDatas.flatMap(_.ackIds).grouped(1000).toVector.traverse_ { ackIds =>
              val request = AcknowledgeRequest.newBuilder.setSubscription(config.subscription.show).addAllAckIds(ackIds.asJava).build
              val attempt = for {
@@ -79,7 +79,7 @@ private class PubsubCheckpointer[F[_]: Async](
    */
   override def nack(c: Vector[Unique.Token]): F[Unit] =
     for {
-      ackDatas <- refAckIds.modify(m => (m -- c, c.flatMap(m.get)))
+      ackDatas <- refAckIds.modify(_.remove(c))
       ackIds = ackDatas.flatMap(_.ackIds)
       // A nack is just a modack with zero duration
       _ <- Utils.modAck[F](config, stub, ackIds, Duration.Zero)

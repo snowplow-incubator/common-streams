@@ -26,6 +26,19 @@ trait SourceAndAck[F[_]] {
    * Wraps the [[EventProcessor]] to create a Stream which, when compiled drained, causes events to
    * flow through the processor.
    *
+   * When the stream fails, the error is chosen so that it names the cause:
+   *   - On an error raised by the source of events, the stream fails with the source's error.
+   *     Errors raised while the open windows finish are logged, but never replace it.
+   *   - On an error raised by the [[EventProcessor]], the stream fails with the processor's error.
+   *     Windows that failed only because an earlier window failed are left out. Any other error
+   *     raised meanwhile, such as a failed checkpoint, is combined with it in an
+   *     `fs2.CompositeFailure`, not necessarily in first place.
+   *
+   * The mechanism is described on `LowLevelSource.sourceAndAckImpl`.
+   *
+   * A `SourceAndAck` supports a single run of its stream. Running it again after it has ended is
+   * not supported.
+   *
    * @param config
    *   Configures how events are fed into the processor, e.g. whether to use timed windows
    * @param processor

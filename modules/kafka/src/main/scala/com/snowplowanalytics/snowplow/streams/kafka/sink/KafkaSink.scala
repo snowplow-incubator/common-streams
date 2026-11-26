@@ -15,7 +15,7 @@ import org.apache.kafka.common.serialization.{ByteArraySerializer, StringSeriali
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import com.snowplowanalytics.snowplow.streams.{ListOfList, Sink, Sinkable}
+import com.snowplowanalytics.snowplow.streams.{Sink, Sinkable}
 import com.snowplowanalytics.snowplow.streams.kafka.KafkaSinkConfig
 
 import java.util.UUID
@@ -61,11 +61,11 @@ private[kafka] object KafkaSink {
     ecForWait: ExecutionContext
   ): Sink[F] =
     new Sink[F] {
-      def sink(batch: ListOfList[Sinkable]): F[Unit] = {
+      def sink(batch: Iterable[Sinkable]): F[Unit] = {
+        // Strict, so that every record is sent before any of the futures is awaited
         val futures = Sync[F].delay {
-          batch.asIterable.map { e =>
-            val record = toProducerRecord(config, e)
-            producer.send(record)
+          batch.iterator.map { e =>
+            producer.send(toProducerRecord(config, e))
           }.toIndexedSeq
         }
         Async[F].evalOn(futures, ecForSend).flatMap { fs =>
